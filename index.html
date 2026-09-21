@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#111827">
+<meta name="description" content="Registro sincronizado de clientes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Clientes</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:#1f2937}
+.container{max-width:1000px;margin:auto;padding:24px}.header{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:20px}
+h1{margin:0;font-size:28px}.muted{color:#6b7280;font-size:14px}.card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 2px 12px #0001;margin-bottom:18px}
+.controls{display:flex;gap:10px;flex-wrap:wrap}.search{flex:1;min-width:220px;padding:12px;border:1px solid #d1d5db;border-radius:9px;font-size:15px}
+button{border:0;border-radius:9px;padding:11px 15px;font-weight:600;cursor:pointer}.primary{background:#111827;color:#fff}.secondary{background:#e5e7eb}.danger{background:#fee2e2;color:#991b1b}.success{background:#dcfce7;color:#166534}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #e5e7eb}th{font-size:13px;color:#6b7280}.actions{display:flex;gap:6px;flex-wrap:wrap}
+.empty{text-align:center;padding:35px;color:#6b7280}.footer-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.modal{display:none;position:fixed;inset:0;background:#0008;align-items:center;justify-content:center;padding:20px}.modal.show{display:flex}
+.modal-box{background:#fff;border-radius:14px;padding:22px;width:min(450px,100%)}label{display:block;font-size:14px;font-weight:600;margin:12px 0 6px}
+input[type=text],input[type=tel],input[type=date],input[type=email],input[type=password]{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:15px}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.login{max-width:420px;margin:10vh auto}
+.error{background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin-top:12px;display:none}
+@media(max-width:650px){.container{padding:14px}.header{align-items:flex-start;flex-direction:column}table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{border-bottom:1px solid #e5e7eb;padding:12px 0}td{border:0;padding:5px 0}td:before{font-weight:700;display:inline-block;width:90px;color:#6b7280}td:nth-child(2):before{content:"Teléfono"}td:nth-child(3):before{content:"Fecha"}td:nth-child(4):before{content:"Acciones"}td:first-child{font-size:17px;font-weight:700}.actions{margin-left:90px}}
+</style>
+</head>
+<body>
+<div id="loginView" class="container login">
+  <div class="card">
+    <h1>Clientes</h1>
+    <p class="muted">Inicia sesión para acceder al registro.</p>
+    <label>Correo</label><input id="email" type="email" placeholder="correo@ejemplo.com">
+    <label>Contraseña</label><input id="password" type="password">
+    <div class="modal-actions"><button class="primary" onclick="login()">Ingresar</button></div>
+    <div id="loginError" class="error"></div>
+  </div>
+</div>
+
+<div id="appView" class="container" style="display:none">
+  <div class="header">
+    <div><h1>Clientes</h1><div class="muted">Registro sincronizado de clientes</div></div>
+    <div><button class="secondary" onclick="logout()">Cerrar sesión</button></div>
+  </div>
+
+  <div class="card">
+    <div class="controls">
+      <input id="search" class="search" placeholder="Buscar por nombre o teléfono..." oninput="render()">
+      <button class="secondary" onclick="selectAllVisible()">☑ Seleccionar visibles</button>
+      <button class="success" onclick="copySelected()">📋 Copiar números</button>
+      <button class="primary" onclick="openModal()">+ Nuevo cliente</button>
+    </div>
+    <div class="footer-tools">
+      <button class="secondary" onclick="exportCSV()">⬇ Exportar CSV</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="status" class="muted" style="margin-bottom:10px">Cargando...</div>
+    <table><thead><tr><th></th><th>Nombre</th><th>Teléfono</th><th>Fecha</th><th>Acciones</th></tr></thead>
+    <tbody id="list"></tbody></table>
+  </div>
+</div>
+
+<div id="modal" class="modal">
+ <div class="modal-box">
+  <h2 id="modalTitle">Nuevo cliente</h2>
+  <input id="editId" type="hidden">
+  <label>Nombre</label><input id="name" type="text" placeholder="Ej. Juan Pérez">
+  <label>Número de celular</label><input id="phone" type="tel" placeholder="Ej. 76543210">
+  <label>Fecha</label><input id="date" type="date">
+  <div class="modal-actions"><button class="secondary" onclick="closeModal()">Cancelar</button><button class="primary" onclick="saveClient()">Guardar</button></div>
+ </div>
+</div>
+<div class="design" style="text-align: center;">design by brayan_sonco</div>
+
+<script>
+
+const SUPABASE_URL="https://gkuwskzrurzrbdwwhkfp.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_4ffHbg6EfCDDk_H_RgLVVg_M-Iz52w7";
+const supabaseClient=supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+
+let clients=[];
+
+function today(){return new Date().toISOString().slice(0,10)}
+function formatDate(d){if(!d)return "";const [y,m,day]=d.split("-");return `${day}/${m}/${y}`}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function showError(msg){const e=document.getElementById("loginError");e.textContent=msg;e.style.display="block"}
+
+async function login(){
+ const email=document.getElementById("email").value.trim(),password=document.getElementById("password").value;
+ document.getElementById("loginError").style.display="none";
+ const {error}=await supabaseClient.auth.signInWithPassword({email,password});
+ if(error)showError("No se pudo iniciar sesión. Revisa el correo y la contraseña.");
+}
+async function logout(){await supabaseClient.auth.signOut()}
+
+supabaseClient.auth.onAuthStateChange((_event,session)=>{
+ if(session){document.getElementById("loginView").style.display="none";document.getElementById("appView").style.display="block";loadClients()}
+ else{document.getElementById("appView").style.display="none";document.getElementById("loginView").style.display="block"}
+});
+
+async function loadClients(){
+ document.getElementById("status").textContent="Cargando...";
+ const {data,error}=await supabaseClient.from("clientes").select("*").order("created_at",{ascending:false});
+ if(error){document.getElementById("status").textContent="Error al cargar: "+error.message;return}
+ clients=data||[];render();
+}
+function render(){
+ const q=document.getElementById("search").value.toLowerCase().trim();
+ const filtered=clients.filter(c=>(c.name+" "+c.phone).toLowerCase().includes(q));
+ document.getElementById("status").textContent=`${clients.length} cliente(s) registrado(s)${q?" · "+filtered.length+" encontrados":""}`;
+ const list=document.getElementById("list");
+ if(!filtered.length){list.innerHTML='<tr><td colspan="5" class="empty">No hay clientes para mostrar.</td></tr>';return}
+ list.innerHTML=filtered.map(c=>`<tr>
+ <td><input type="checkbox" class="pick" value="${c.id}"></td>
+ <td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${formatDate(c.date)}</td>
+ <td><div class="actions"><button class="secondary" onclick="editClient('${c.id}')">Editar</button><button class="danger" onclick="deleteClient('${c.id}')">Eliminar</button></div></td>
+ </tr>`).join("");
+}
+function openModal(id=null){
+ document.getElementById("modal").classList.add("show");document.getElementById("editId").value=id||"";
+ document.getElementById("modalTitle").textContent=id?"Editar cliente":"Nuevo cliente";
+ if(id){const c=clients.find(x=>x.id===id);document.getElementById("name").value=c.name;document.getElementById("phone").value=c.phone;document.getElementById("date").value=c.date}
+ else{document.getElementById("name").value="";document.getElementById("phone").value="";document.getElementById("date").value=today()}
+ setTimeout(()=>document.getElementById("name").focus(),50)
+}
+function closeModal(){document.getElementById("modal").classList.remove("show")}
+async function saveClient(){
+ const name=document.getElementById("name").value.trim(),phone=document.getElementById("phone").value.trim(),date=document.getElementById("date").value||today(),id=document.getElementById("editId").value;
+ if(!name||!phone){alert("Ingresa el nombre y el número.");return}
+ let result;
+ if(id) result=await supabaseClient.from("clientes").update({name,phone,date}).eq("id",id);
+ else result=await supabaseClient.from("clientes").insert({name,phone,date});
+ if(result.error){alert("No se pudo guardar: "+result.error.message);return}
+ closeModal();await loadClients();
+}
+function editClient(id){openModal(id)}
+async function deleteClient(id){
+ const c=clients.find(x=>x.id===id);if(!confirm(`¿Eliminar a ${c.name}?`))return;
+ const {error}=await supabaseClient.from("clientes").delete().eq("id",id);
+ if(error){alert("No se pudo eliminar: "+error.message);return}await loadClients();
+}
+function selectAllVisible(){const boxes=[...document.querySelectorAll(".pick")];if(!boxes.length)return;const all=boxes.every(x=>x.checked);boxes.forEach(x=>x.checked=!all)}
+function selectedIds(){return [...document.querySelectorAll(".pick:checked")].map(x=>x.value)}
+async function copySelected(){
+ let ids=selectedIds(),data=clients.filter(c=>ids.includes(c.id));
+ if(!data.length){if(!confirm("No seleccionaste clientes. ¿Copiar todos los números?"))return;data=clients}
+ if(!data.length){alert("No hay números registrados.");return}
+ const text=data.map(c=>c.phone).join("\n");
+ try{await navigator.clipboard.writeText(text);alert(`${data.length} número(s) copiado(s).`)}catch(e){prompt("Copia estos números:",text)}
+}
+function exportCSV(){
+ const rows=[["Nombre","Telefono","Fecha"],...clients.map(c=>[c.name,c.phone,c.date])];
+ const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+ const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}),a=document.createElement("a");
+ a.href=URL.createObjectURL(blob);a.download="clientes.csv";a.click();URL.revokeObjectURL(a.href);
+}
+document.getElementById("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js").catch(console.error));
+}
+</script>
+</body>
+</html>
