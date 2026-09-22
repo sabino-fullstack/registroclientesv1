@@ -4,33 +4,28 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#111827">
-<meta name="description" content="Registro sincronizado de clientes">
 <link rel="manifest" href="manifest.json">
-<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 <title>Clientes</title>
+<link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<style>
-*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:#1f2937}
-.container{max-width:1000px;margin:auto;padding:24px}.header{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:20px}
-h1{margin:0;font-size:28px}.muted{color:#6b7280;font-size:14px}.card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 2px 12px #0001;margin-bottom:18px}
-.controls{display:flex;gap:10px;flex-wrap:wrap}.search{flex:1;min-width:220px;padding:12px;border:1px solid #d1d5db;border-radius:9px;font-size:15px}
-button{border:0;border-radius:9px;padding:11px 15px;font-weight:600;cursor:pointer}.primary{background:#111827;color:#fff}.secondary{background:#e5e7eb}.danger{background:#fee2e2;color:#991b1b}.success{background:#dcfce7;color:#166534}
-table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid #e5e7eb}th{font-size:13px;color:#6b7280}.actions{display:flex;gap:6px;flex-wrap:wrap}
-.empty{text-align:center;padding:35px;color:#6b7280}.footer-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-.modal{display:none;position:fixed;inset:0;background:#0008;align-items:center;justify-content:center;padding:20px}.modal.show{display:flex}
-.modal-box{background:#fff;border-radius:14px;padding:22px;width:min(450px,100%)}label{display:block;font-size:14px;font-weight:600;margin:12px 0 6px}
-input[type=text],input[type=tel],input[type=date],input[type=email],input[type=password]{width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:15px}
-.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}.login{max-width:420px;margin:10vh auto}
-.error{background:#fee2e2;color:#991b1b;padding:10px;border-radius:8px;margin-top:12px;display:none}
-@media(max-width:650px){.container{padding:14px}.header{align-items:flex-start;flex-direction:column}table,thead,tbody,tr,th,td{display:block}thead{display:none}tr{border-bottom:1px solid #e5e7eb;padding:12px 0}td{border:0;padding:5px 0}td:before{font-weight:700;display:inline-block;width:90px;color:#6b7280}td:nth-child(2):before{content:"Teléfono"}td:nth-child(3):before{content:"Fecha"}td:nth-child(4):before{content:"Acciones"}td:first-child{font-size:17px;font-weight:700}.actions{margin-left:90px}}
-</style>
 </head>
 <body>
+
+<div class="brand-bar">
+  <div class="brand-logo-wrap">
+    <img src="img/logo.png" alt="Logo de Óptica Perfect HD"
+         class="brand-logo"
+         onerror="this.style.display='none';document.getElementById('logoPlaceholder').style.display='flex';">
+    <!--<div id="logoPlaceholder" class="logo-placeholder">LOGO</div>-->
+  </div>
+  <div class="brand-name">Óptica Perfect HD</div>
+</div>
+
 <div id="loginView" class="container login">
   <div class="card">
-    <h1>Clientes</h1>
-    <p class="muted">Inicia sesión para acceder al registro.</p>
+    <h1>Registro de clientes</h1>
+    <p class="muted">Inicia sesión para acceder al registro de Óptica Perfect HD.</p>
     <label>Correo</label><input id="email" type="email" placeholder="correo@ejemplo.com">
     <label>Contraseña</label><input id="password" type="password">
     <div class="modal-actions"><button class="primary" onclick="login()">Ingresar</button></div>
@@ -40,13 +35,16 @@ input[type=text],input[type=tel],input[type=date],input[type=email],input[type=p
 
 <div id="appView" class="container" style="display:none">
   <div class="header">
-    <div><h1>Clientes</h1><div class="muted">Registro sincronizado de clientes</div></div>
-    <div><button class="secondary" onclick="logout()">Cerrar sesión</button></div>
+    <div>
+      <h1>Clientes</h1>
+      <div class="muted">Registro sincronizado de Optica Perfect </div>
+    </div>
+    <button class="secondary" onclick="logout()">Cerrar sesión</button>
   </div>
 
   <div class="card">
     <div class="controls">
-      <input id="search" class="search" placeholder="Buscar por nombre o teléfono..." oninput="render()">
+      <input id="search" class="search" placeholder="Buscar por ID, nombre o teléfono..." oninput="render()">
       <button class="secondary" onclick="selectAllVisible()">☑ Seleccionar visibles</button>
       <button class="success" onclick="copySelected()">📋 Copiar números</button>
       <button class="primary" onclick="openModal()">+ Nuevo cliente</button>
@@ -57,35 +55,168 @@ input[type=text],input[type=tel],input[type=date],input[type=email],input[type=p
   </div>
 
   <div class="card">
-    <div id="status" class="muted" style="margin-bottom:10px">Cargando...</div>
-    <table><thead><tr><th></th><th>Nombre</th><th>Teléfono</th><th>Fecha</th><th>Acciones</th></tr></thead>
-    <tbody id="list"></tbody></table>
+    <div id="status" class="muted status">Cargando...</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th></th><th>ID / N.º recibo</th><th>Nombre</th><th>Teléfono</th><th>Acciones</th></tr>
+        </thead>
+        <tbody id="list"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
+<!-- Formulario -->
 <div id="modal" class="modal">
- <div class="modal-box">
-  <h2 id="modalTitle">Nuevo cliente</h2>
-  <input id="editId" type="hidden">
-  <label>Nombre</label><input id="name" type="text" placeholder="Ej. Juan Pérez">
-  <label>Número de celular</label><input id="phone" type="tel" placeholder="Ej. 76543210">
-  <label>Fecha</label><input id="date" type="date">
-  <div class="modal-actions"><button class="secondary" onclick="closeModal()">Cancelar</button><button class="primary" onclick="saveClient()">Guardar</button></div>
- </div>
+  <div class="modal-box form-box">
+    <div class="modal-head">
+      <div>
+        <h2 id="modalTitle">Nuevo cliente</h2>
+        <p class="muted">Datos del talonario y del trabajo óptico.</p>
+      </div>
+      <button class="icon-button" onclick="closeModal()" aria-label="Cerrar">✕</button>
+    </div>
+
+    <input id="editId" type="hidden">
+
+    <div class="section-title">Identificación</div>
+    <div class="form-grid two">
+      <div>
+        <label>Fecha de recepción</label>
+        <input id="startt_date" type="date">
+      </div>
+      <div>
+        <label>N.º de recibo / ID</label>
+        <input id="receipt_number" type="text" placeholder="Ej. 001876">
+      </div>
+      <div>
+        <label>N.º de talonario</label>
+        <input id="booklet_number" type="text" placeholder="Ej. 12">
+      </div>
+      <div>
+        <label>Cliente</label>
+        <input id="name" type="text" placeholder="Ej. Juan Pérez">
+      </div>
+      <div>
+        <label>Edad</label>
+        <input id="age" type="number" min="0" max="120" placeholder="Ej. 35">
+      </div>
+      <div>
+        <label>Teléfono</label>
+        <input id="phone" type="tel" placeholder="Ej. 76543210">
+      </div>
+    </div>
+
+    <div class="section-title">Entrega</div>
+    <div class="form-grid two">
+      <div>
+        <label>Día de entrega</label>
+        <input id="delivery_date" type="date">
+      </div>
+      <div>
+        <label>Hora de entrega</label>
+        <input id="delivery_time" type="time">
+      </div>
+    </div>
+
+    <div class="section-title">Trabajo</div>
+    <div class="form-grid two">
+      <div><label>Armazón</label><input id="frame" type="text"></div>
+      <div><label>Modelo</label><input id="model" type="text"></div>
+      <div><label>Marca</label><input id="brand" type="text"></div>
+      <div><label>Cristales</label><input id="lenses" type="text"></div>
+      <div><label>Receta Dr.</label><input id="doctor_prescription" type="text"></div>
+      <div><label>Detalle</label><input id="detail" type="text"></div>
+      <div><label>Entregado por</label><input id="delivered_by" type="text"></div>
+    </div>
+
+    <div class="section-title">Cuenta</div>
+    <div class="form-grid three">
+      <div><label>A cuenta</label><input id="account" type="number" min="0" step="0.01" placeholder="0.00"></div>
+      <div><label>Saldo</label><input id="balance" type="number" min="0" step="0.01" placeholder="0.00"></div>
+      <div><label>Total</label><input id="total" type="number" min="0" step="0.01" placeholder="0.00"></div>
+    </div>
+
+    <div class="section-title">Receta — Lejos</div>
+    <div class="prescription-labels"><span></span><span>Esf.</span><span>Cil.</span><span>Eje</span></div>
+    <div class="prescription-grid">
+      <strong>O.D.</strong>
+      <input id="far_od_sph" type="text">
+      <input id="far_od_cyl" type="text">
+      <input id="far_od_axis" type="text">
+      <strong>O.I.</strong>
+      <input id="far_oi_sph" type="text">
+      <input id="far_oi_cyl" type="text">
+      <input id="far_oi_axis" type="text">
+    </div>
+
+    <div class="section-title">Adición / Cerca</div>
+    <div class="form-grid two">
+      <div><label>Adición</label><input id="addition" type="text"></div>
+      <div><label>D.P.</label><input id="dp" type="text"></div>
+    </div>
+
+    <div class="prescription-labels"><span></span><span>Esf.</span><span>Cil.</span><span>Eje</span></div>
+    <div class="prescription-grid">
+      <strong>O.D.</strong>
+      <input id="near_od_sph" type="text">
+      <input id="near_od_cyl" type="text">
+      <input id="near_od_axis" type="text">
+      <strong>O.I.</strong>
+      <input id="near_oi_sph" type="text">
+      <input id="near_oi_cyl" type="text">
+      <input id="near_oi_axis" type="text">
+    </div>
+
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeModal()">Cancelar</button>
+      <button class="primary" onclick="saveClient()">Guardar</button>
+    </div>
+  </div>
 </div>
-<div class="design" style="text-align: center;">design by brayan_sonco</div>
+
+<!-- Detalle -->
+<div id="detailModal" class="modal">
+  <div class="modal-box detail-box">
+    <div class="modal-head">
+      <div>
+        <h2>Datos del cliente</h2>
+        <p id="detailSubtitle" class="muted"></p>
+      </div>
+      <button class="icon-button" onclick="closeDetail()" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="detailContent" class="detail-content"></div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeDetail()">Cerrar</button>
+      <button id="detailEditButton" class="primary">Editar</button>
+    </div>
+  </div>
+</div>
+
+<div class="design">design by brayan_sonco</div>
 
 <script>
-
 const SUPABASE_URL="https://gkuwskzrurzrbdwwhkfp.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY="sb_publishable_4ffHbg6EfCDDk_H_RgLVVg_M-Iz52w7";
 const supabaseClient=supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
 
 let clients=[];
 
+const fields=[
+ "startt_date","receipt_number","booklet_number","name","age","phone","delivery_date","delivery_time",
+ "frame","model","brand","lenses","doctor_prescription","detail","delivered_by",
+ "account","balance","total",
+ "far_od_sph","far_od_cyl","far_od_axis","far_oi_sph","far_oi_cyl","far_oi_axis",
+ "addition","dp","near_od_sph","near_od_cyl","near_od_axis","near_oi_sph","near_oi_cyl","near_oi_axis"
+];
+
 function today(){return new Date().toISOString().slice(0,10)}
 function formatDate(d){if(!d)return "";const [y,m,day]=d.split("-");return `${day}/${m}/${y}`}
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function formatMoney(v){if(v===null||v===undefined||v==="")return "";return Number(v).toFixed(2)}
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function val(id){return document.getElementById(id).value.trim()}
+function setVal(id,v){document.getElementById(id).value=v??""}
 function showError(msg){const e=document.getElementById("loginError");e.textContent=msg;e.style.display="block"}
 
 async function login(){
@@ -97,8 +228,14 @@ async function login(){
 async function logout(){await supabaseClient.auth.signOut()}
 
 supabaseClient.auth.onAuthStateChange((_event,session)=>{
- if(session){document.getElementById("loginView").style.display="none";document.getElementById("appView").style.display="block";loadClients()}
- else{document.getElementById("appView").style.display="none";document.getElementById("loginView").style.display="block"}
+ if(session){
+   document.getElementById("loginView").style.display="none";
+   document.getElementById("appView").style.display="block";
+   loadClients();
+ }else{
+   document.getElementById("appView").style.display="none";
+   document.getElementById("loginView").style.display="block";
+ }
 });
 
 async function loadClients(){
@@ -107,60 +244,182 @@ async function loadClients(){
  if(error){document.getElementById("status").textContent="Error al cargar: "+error.message;return}
  clients=data||[];render();
 }
+
 function render(){
  const q=document.getElementById("search").value.toLowerCase().trim();
- const filtered=clients.filter(c=>(c.name+" "+c.phone).toLowerCase().includes(q));
+ const filtered=clients.filter(c=>
+   `${c.receipt_number||""} ${c.name||""} ${c.phone||""}`.toLowerCase().includes(q)
+ );
  document.getElementById("status").textContent=`${clients.length} cliente(s) registrado(s)${q?" · "+filtered.length+" encontrados":""}`;
  const list=document.getElementById("list");
- if(!filtered.length){list.innerHTML='<tr><td colspan="5" class="empty">No hay clientes para mostrar.</td></tr>';return}
+ if(!filtered.length){
+   list.innerHTML='<tr><td colspan="5" class="empty">No hay clientes para mostrar.</td></tr>';
+   return;
+ }
  list.innerHTML=filtered.map(c=>`<tr>
- <td><input type="checkbox" class="pick" value="${c.id}"></td>
- <td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${formatDate(c.date)}</td>
- <td><div class="actions"><button class="secondary" onclick="editClient('${c.id}')">Editar</button><button class="danger" onclick="deleteClient('${c.id}')">Eliminar</button></div></td>
+   <td><input type="checkbox" class="pick" value="${c.id}"></td>
+   <td class="id-cell">${esc(c.receipt_number||"—")}</td>
+   <td>${esc(c.name||"—")}</td>
+   <td>${esc(c.phone||"—")}</td>
+   <td><div class="actions">
+     <button class="secondary small" onclick="showDetail('${c.id}')">Mostrar datos</button>
+     <button class="secondary small" onclick="editClient('${c.id}')">Editar</button>
+     <button class="danger small" onclick="deleteClient('${c.id}')">Eliminar</button>
+   </div></td>
  </tr>`).join("");
 }
+
+function clearForm(){
+ fields.forEach(id=>setVal(id,""));
+ setVal("delivery_date",today());
+ setVal("account","0");
+ setVal("balance","0");
+ setVal("total","0");
+}
+
 function openModal(id=null){
- document.getElementById("modal").classList.add("show");document.getElementById("editId").value=id||"";
+ document.getElementById("modal").classList.add("show");
+ document.getElementById("editId").value=id||"";
  document.getElementById("modalTitle").textContent=id?"Editar cliente":"Nuevo cliente";
- if(id){const c=clients.find(x=>x.id===id);document.getElementById("name").value=c.name;document.getElementById("phone").value=c.phone;document.getElementById("date").value=c.date}
- else{document.getElementById("name").value="";document.getElementById("phone").value="";document.getElementById("date").value=today()}
- setTimeout(()=>document.getElementById("name").focus(),50)
+ if(id){
+   const c=clients.find(x=>x.id===id);
+   fields.forEach(f=>setVal(f,c?.[f]));
+ }else{
+   clearForm();
+ }
+ setTimeout(()=>document.getElementById("receipt_number").focus(),50);
 }
+
 function closeModal(){document.getElementById("modal").classList.remove("show")}
+
 async function saveClient(){
- const name=document.getElementById("name").value.trim(),phone=document.getElementById("phone").value.trim(),date=document.getElementById("date").value||today(),id=document.getElementById("editId").value;
- if(!name||!phone){alert("Ingresa el nombre y el número.");return}
+ const id=document.getElementById("editId").value;
+ const data={};
+ fields.forEach(f=>{
+   let v=val(f);
+   if(["age"].includes(f)) v=v===""?null:Number(v);
+   if(["account","balance","total"].includes(f)) v=v===""?0:Number(v);
+   if(v==="")v=null;
+   data[f]=v;
+ });
+ data.date=data.delivery_date||today();
+
+ if(!data.receipt_number||!data.name||!data.phone){
+   alert("Ingresa el N.º de recibo / ID, el nombre y el teléfono.");
+   return;
+ }
  let result;
- if(id) result=await supabaseClient.from("clientes").update({name,phone,date}).eq("id",id);
- else result=await supabaseClient.from("clientes").insert({name,phone,date});
+ if(id) result=await supabaseClient.from("clientes").update(data).eq("id",id);
+ else result=await supabaseClient.from("clientes").insert(data);
  if(result.error){alert("No se pudo guardar: "+result.error.message);return}
- closeModal();await loadClients();
+ closeModal();
+ await loadClients();
 }
+
 function editClient(id){openModal(id)}
-async function deleteClient(id){
- const c=clients.find(x=>x.id===id);if(!confirm(`¿Eliminar a ${c.name}?`))return;
- const {error}=await supabaseClient.from("clientes").delete().eq("id",id);
- if(error){alert("No se pudo eliminar: "+error.message);return}await loadClients();
+
+function showDetail(id){
+ const c=clients.find(x=>x.id===id);
+ if(!c)return;
+ document.getElementById("detailSubtitle").textContent=`ID ${c.receipt_number||"—"} · ${c.name||"Sin nombre"}`;
+ document.getElementById("detailContent").innerHTML=`
+   ${detailSection("Identificación",[
+     ["N.º de recibo / ID",c.receipt_number],["N.º de talonario",c.booklet_number],["Fecha de recepción",formatDate(c.startt_date)],["Cliente",c.name],["Edad",c.age],["Teléfono",c.phone]
+   ])}
+   ${detailSection("Entrega",[
+     ["Día de entrega",formatDate(c.delivery_date||c.date)],["Hora de entrega",c.delivery_time]
+   ])}
+   ${detailSection("Trabajo",[
+     ["Armazón",c.frame],["Modelo",c.model],["Marca",c.brand],["Cristales",c.lenses],["Receta Dr.",c.doctor_prescription],["Detalle",c.detail],["Entregado por",c.delivered_by]
+   ])}
+   ${detailSection("Cuenta",[
+     ["A cuenta",formatMoney(c.account)],["Saldo",formatMoney(c.balance)],["Total",formatMoney(c.total)]
+   ])}
+   ${prescriptionSection("Lejos",c,"far")}
+   ${detailSection("Adición / Cerca",[
+     ["Adición",c.addition],["D.P.",c.dp]
+   ])}
+   ${prescriptionSection("Cerca",c,"near")}
+ `;
+ document.getElementById("detailEditButton").onclick=()=>{closeDetail();openModal(id)};
+ document.getElementById("detailModal").classList.add("show");
 }
-function selectAllVisible(){const boxes=[...document.querySelectorAll(".pick")];if(!boxes.length)return;const all=boxes.every(x=>x.checked);boxes.forEach(x=>x.checked=!all)}
+
+function detailSection(title,items){
+ return `<div class="detail-section"><h3>${esc(title)}</h3><div class="detail-grid">
+ ${items.map(([k,v])=>`<div class="detail-item"><span>${esc(k)}</span><strong>${esc(v===null||v===undefined||v===""?"—":v)}</strong></div>`).join("")}
+ </div></div>`;
+}
+
+function prescriptionSection(title,c,prefix){
+ return `<div class="detail-section"><h3>${esc(title)}</h3>
+ <div class="rx-table">
+   <div></div><strong>Esf.</strong><strong>Cil.</strong><strong>Eje</strong>
+   <strong>O.D.</strong><span>${esc(c[`${prefix}_od_sph`]||"—")}</span><span>${esc(c[`${prefix}_od_cyl`]||"—")}</span><span>${esc(c[`${prefix}_od_axis`]||"—")}</span>
+   <strong>O.I.</strong><span>${esc(c[`${prefix}_oi_sph`]||"—")}</span><span>${esc(c[`${prefix}_oi_cyl`]||"—")}</span><span>${esc(c[`${prefix}_oi_axis`]||"—")}</span>
+ </div></div>`;
+}
+
+function closeDetail(){document.getElementById("detailModal").classList.remove("show")}
+
+async function deleteClient(id){
+ const c=clients.find(x=>x.id===id);
+ if(!confirm(`¿Eliminar a ${c?.name||"este cliente"}?`))return;
+ const {error}=await supabaseClient.from("clientes").delete().eq("id",id);
+ if(error){alert("No se pudo eliminar: "+error.message);return}
+ await loadClients();
+}
+
+function selectAllVisible(){
+ const boxes=[...document.querySelectorAll(".pick")];
+ if(!boxes.length)return;
+ const all=boxes.every(x=>x.checked);
+ boxes.forEach(x=>x.checked=!all);
+}
 function selectedIds(){return [...document.querySelectorAll(".pick:checked")].map(x=>x.value)}
+
 async function copySelected(){
  let ids=selectedIds(),data=clients.filter(c=>ids.includes(c.id));
  if(!data.length){if(!confirm("No seleccionaste clientes. ¿Copiar todos los números?"))return;data=clients}
  if(!data.length){alert("No hay números registrados.");return}
- const text=data.map(c=>c.phone).join("\n");
- try{await navigator.clipboard.writeText(text);alert(`${data.length} número(s) copiado(s).`)}catch(e){prompt("Copia estos números:",text)}
+ const text=data.map(c=>c.phone).filter(Boolean).join("\n");
+ try{await navigator.clipboard.writeText(text);alert(`${data.length} número(s) copiado(s).`)}
+ catch(e){prompt("Copia estos números:",text)}
 }
+
 function exportCSV(){
- const rows=[["Nombre","Telefono","Fecha"],...clients.map(c=>[c.name,c.phone,c.date])];
- const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
- const blob=new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}),a=document.createElement("a");
- a.href=URL.createObjectURL(blob);a.download="clientes.csv";a.click();URL.revokeObjectURL(a.href);
+ const headers=[
+  "ID/N.º recibo","N.º talonario","Fecha de recepción","Cliente","Edad","Teléfono","Día entrega","Hora entrega",
+  "Armazón","Modelo","Marca","Cristales","Receta Dr.","Detalle","Entregado por",
+  "A cuenta","Saldo","Total","Lejos OD Esf","Lejos OD Cil","Lejos OD Eje","Lejos OI Esf","Lejos OI Cil","Lejos OI Eje",
+  "Adición","D.P.","Cerca OD Esf","Cerca OD Cil","Cerca OD Eje","Cerca OI Esf","Cerca OI Cil","Cerca OI Eje"
+ ];
+ const rows=[headers,...clients.map(c=>[
+    c.receipt_number,c.booklet_number,c.startt_date,c.name,c.age,c.phone,c.delivery_date,c.delivery_time,
+    c.frame,c.model,c.brand,c.lenses,c.doctor_prescription,c.detail,c.delivered_by,
+    c.account,c.balance,c.total,c.far_od_sph,c.far_od_cyl,c.far_od_axis,c.far_oi_sph,c.far_oi_cyl,c.far_oi_axis,
+    c.addition,c.dp,c.near_od_sph,c.near_od_cyl,c.near_od_axis,c.near_oi_sph,c.near_oi_cyl,c.near_oi_axis
+ ])];
+
+
+ const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+
+
+ const content = "sep=;\n" + csv;
+
+ const blob = new Blob(["\ufeff" + content], { type: "text/csv;charset=utf-8;" });
+ const a = document.createElement("a");
+ a.href = URL.createObjectURL(blob);
+ a.download = "clientes.csv";
+ a.click();
+ URL.revokeObjectURL(a.href);
 }
+
 document.getElementById("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js").catch(console.error));
-}
+document.getElementById("detailModal").addEventListener("click",e=>{if(e.target.id==="detailModal")closeDetail()});
+</script>
+<script>
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("service-worker.js"))}
 </script>
 </body>
 </html>
