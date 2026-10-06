@@ -8,7 +8,7 @@
 <link rel="icon" href="icon-192.png">
 <title>Clientes</title>
 <link rel="stylesheet" href="styles.css">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
 </head>
 <body>
 
@@ -16,7 +16,7 @@
   <div class="brand-logo-wrap">
     <img src="img/logo.png" alt="Logo de Óptica Perfect HD"
          class="brand-logo"
-         onerror="this.style.display='none';document.getElementById('logoPlaceholder').style.display='flex';">
+         onerror="this.style.display='none';">
     <!--<div id="logoPlaceholder" class="logo-placeholder">LOGO</div>-->
   </div>
   <div class="brand-name">Óptica Perfect HD</div>
@@ -44,7 +44,7 @@
 
   <div class="card">
     <div class="controls">
-      <input id="search" class="search" placeholder="Buscar por ID, nombre o teléfono..." oninput="render()">
+      <input id="search" class="search" placeholder="Buscar por N.º de recibo, nombre o teléfono..." oninput="render()">
       <button class="secondary" onclick="selectAllVisible()">☑ Seleccionar visibles</button>
       <button class="success" onclick="copySelected()">📋 Copiar números</button>
       <button class="primary" onclick="openModal()">+ Nuevo cliente</button>
@@ -197,9 +197,34 @@
 <div class="design">design by brayan_sonco</div>
 
 <script>
-const SUPABASE_URL="https://gkuwskzrurzrbdwwhkfp.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY="sb_publishable_4ffHbg6EfCDDk_H_RgLVVg_M-Iz52w7";
-const supabaseClient=supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+// ===== Configuración por entorno =====
+// Solo la URL de producción usa la base REAL. Cualquier otra (previews de Vercel, localhost)
+// usa la base de PRUEBAS. Así las claves no se mezclan al hacer merge a main.
+const PROD_HOSTS=["clientesnubev1.vercel.app"];
+const IS_PROD=PROD_HOSTS.includes(location.hostname);
+const CONFIGS={
+ prod:{
+  url:"https://gkuwskzrurzrbdwwhkfp.supabase.co",
+  key:"sb_publishable_4ffHbg6EfCDDk_H_RgLVVg_M-Iz52w7"
+ },
+ test:{
+  url:"https://isvlipgfntxrojeymbyz.supabase.co",   // <-- pegar aquí la URL del proyecto Supabase de PRUEBAS
+  key:"sb_publishable_62G0UMLLc16ojFlSdgOj8w_u_kYzhkS"    // <-- pegar aquí su clave publishable (nunca service_role / sb_secret)
+ }
+};
+const CFG=IS_PROD?CONFIGS.prod:CONFIGS.test;
+
+if(!CFG.url||!CFG.key){
+ document.body.innerHTML='<div style="max-width:560px;margin:12vh auto;padding:24px;font-family:Arial,sans-serif;text-align:center"><h2>Entorno de pruebas sin configurar</h2><p>Para proteger los datos reales, esta dirección no se conecta a la base de producción. Completa la configuración <b>test</b> en index.html con los datos del proyecto Supabase de pruebas.</p></div>';
+ throw new Error("Falta configuración del entorno de pruebas");
+}
+if(!IS_PROD){
+ const b=document.createElement("div");
+ b.textContent="ENTORNO DE PRUEBAS — no es la base de datos real";
+ b.style.cssText="background:#b91c1c;color:#fff;text-align:center;padding:6px;font-weight:700;font-size:13px";
+ document.body.prepend(b);
+}
+const supabaseClient=supabase.createClient(CFG.url,CFG.key);
 
 let clients=[];
 
@@ -211,7 +236,7 @@ const fields=[
  "addition","dp","near_od_sph","near_od_cyl","near_od_axis","near_oi_sph","near_oi_cyl","near_oi_axis"
 ];
 
-function today(){return new Date().toISOString().slice(0,10)}
+function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`}
 function formatDate(d){if(!d)return "";const [y,m,day]=d.split("-");return `${day}/${m}/${y}`}
 function formatMoney(v){if(v===null||v===undefined||v==="")return "";return Number(v).toFixed(2)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
@@ -227,12 +252,15 @@ async function login(){
 }
 async function logout(){await supabaseClient.auth.signOut()}
 
+let loadedUserId=null;
 supabaseClient.auth.onAuthStateChange((_event,session)=>{
  if(session){
    document.getElementById("loginView").style.display="none";
    document.getElementById("appView").style.display="block";
-   loadClients();
+   // Solo cargar la lista al entrar, no cada vez que se renueva el token
+   if(loadedUserId!==session.user.id){loadedUserId=session.user.id;setTimeout(loadClients,0)}
  }else{
+   loadedUserId=null;
    document.getElementById("appView").style.display="none";
    document.getElementById("loginView").style.display="block";
  }
@@ -240,9 +268,16 @@ supabaseClient.auth.onAuthStateChange((_event,session)=>{
 
 async function loadClients(){
  document.getElementById("status").textContent="Cargando...";
- const {data,error}=await supabaseClient.from("clientes").select("*").order("created_at",{ascending:false});
- if(error){document.getElementById("status").textContent="Error al cargar: "+error.message;return}
- clients=data||[];render();
+ // Supabase devuelve máximo 1000 filas por consulta: se pide por páginas
+ const PAGE=1000;let all=[];
+ for(let from=0;;from+=PAGE){
+   const {data,error}=await supabaseClient.from("clientes").select("*")
+     .order("created_at",{ascending:false}).order("id").range(from,from+PAGE-1);
+   if(error){document.getElementById("status").textContent="Error al cargar: "+error.message;return}
+   all=all.concat(data||[]);
+   if(!data||data.length<PAGE)break;
+ }
+ clients=all;render();
 }
 
 function render(){
@@ -271,7 +306,7 @@ function render(){
 
 function clearForm(){
  fields.forEach(id=>setVal(id,""));
- setVal("delivery_date",today());
+ setVal("startt_date",today());   // fecha de recepción = hoy (editable)
  setVal("account","0");
  setVal("balance","0");
  setVal("total","0");
@@ -302,7 +337,7 @@ async function saveClient(){
    if(v==="")v=null;
    data[f]=v;
  });
- data.date=data.delivery_date||today();
+ data.date=data.delivery_date||data.startt_date||today();
 
  if(!data.receipt_number||!data.name||!data.phone){
    alert("Ingresa el N.º de recibo / ID, el nombre y el teléfono.");
@@ -327,7 +362,7 @@ function showDetail(id){
      ["N.º de recibo / ID",c.receipt_number],["N.º de talonario",c.booklet_number],["Fecha de recepción",formatDate(c.startt_date)],["Cliente",c.name],["Edad",c.age],["Teléfono",c.phone]
    ])}
    ${detailSection("Entrega",[
-     ["Día de entrega",formatDate(c.delivery_date||c.date)],["Hora de entrega",c.delivery_time]
+     ["Día de entrega",formatDate(c.delivery_date||c.date)],["Hora de entrega",c.delivery_time?c.delivery_time.slice(0,5):""]
    ])}
    ${detailSection("Trabajo",[
      ["Armazón",c.frame],["Modelo",c.model],["Marca",c.brand],["Cristales",c.lenses],["Receta Dr.",c.doctor_prescription],["Detalle",c.detail],["Entregado por",c.delivered_by]
@@ -402,7 +437,9 @@ function exportCSV(){
  ])];
 
 
- const csv = rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+ // Valores que empiezan con + - = @ (ej. recetas "+1.25") se fuerzan a texto para que Excel no les quite el signo
+ const cell=v=>{const s=String(v ?? "").replace(/"/g,'""');return /^[+\-=@]/.test(s)?`="${s}"`:`"${s}"`};
+ const csv = rows.map(r => r.map(cell).join(";")).join("\n");
 
 
  const content = "sep=;\n" + csv;
@@ -412,7 +449,7 @@ function exportCSV(){
  a.href = URL.createObjectURL(blob);
  a.download = "clientes.csv";
  a.click();
- URL.revokeObjectURL(a.href);
+ setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
 document.getElementById("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});
