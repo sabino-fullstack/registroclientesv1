@@ -73,7 +73,7 @@
     <div class="modal-head">
       <div>
         <h2 id="modalTitle">Nuevo cliente</h2>
-        <p class="muted">Datos del talonario y trabajo óptico.</p>
+        <p class="muted">Datos del talonario y del trabajo óptico.</p>
       </div>
       <button class="icon-button" onclick="closeModal()" aria-label="Cerrar">✕</button>
     </div>
@@ -200,7 +200,7 @@
 // ===== Configuración por entorno =====
 // Solo la URL de producción usa la base REAL. Cualquier otra (previews de Vercel, localhost)
 // usa la base de PRUEBAS. Así las claves no se mezclan al hacer merge a main.
-const PROD_HOSTS=["registroclientesv1.vercel.app"];
+const PROD_HOSTS=["registroclientesv1.vercel.app","clientesnubev1.vercel.app"];
 const IS_PROD=PROD_HOSTS.includes(location.hostname);
 const CONFIGS={
  prod:{
@@ -208,8 +208,8 @@ const CONFIGS={
   key:"sb_publishable_4ffHbg6EfCDDk_H_RgLVVg_M-Iz52w7"
  },
  test:{
-  url:"https://isvlipgfntxrojeymbyz.supabase.co",   // <-- pegar aquí la URL del proyecto Supabase de PRUEBAS
-  key:"sb_publishable_62G0UMLLc16ojFlSdgOj8w_u_kYzhkS"    // <-- pegar aquí su clave publishable (nunca service_role / sb_secret)
+  url:"",   // <-- pegar aquí la URL del proyecto Supabase de PRUEBAS
+  key:""    // <-- pegar aquí su clave publishable (nunca service_role / sb_secret)
  }
 };
 const CFG=IS_PROD?CONFIGS.prod:CONFIGS.test;
@@ -240,6 +240,34 @@ function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 function formatDate(d){if(!d)return "";const [y,m,day]=d.split("-");return `${day}/${m}/${y}`}
 function formatMoney(v){if(v===null||v===undefined||v==="")return "";return Number(v).toFixed(2)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+// ===== WhatsApp =====
+// Lee el campo teléfono (puede traer 2 números separados por guion, barra, coma, "y"...)
+// y devuelve solo los celulares bolivianos válidos (8 dígitos que empiezan con 6 o 7).
+function parsePhones(raw){
+ const s=String(raw||"").trim();
+ if(!s)return [];
+ let parts=s.split(/\s*[\/,;\n]\s*|\s+-\s+|\s+[yYoO]\s+/).filter(Boolean);
+ parts=parts.map(p=>{
+   let d=p.replace(/\D/g,"");
+   if(d.length===11&&d.startsWith("591"))d=d.slice(3);
+   return d;
+ });
+ // "73091680-67938365" (sin espacios): 16 dígitos seguidos = dos números
+ if(parts.length===1&&parts[0].length===16)parts=[parts[0].slice(0,8),parts[0].slice(8)];
+ const out=[];
+ parts.forEach(d=>{if(/^[67]\d{7}$/.test(d)&&!out.includes(d))out.push(d)});
+ return out;
+}
+function waLink(num,text){
+ return `https://wa.me/591${num}${text?`?text=${encodeURIComponent(text)}`:""}`;
+}
+function openWhatsApp(num){window.open(waLink(num),"_blank","noopener")}
+function waButtons(phone){
+ const nums=parsePhones(phone);
+ if(!nums.length)return `<button class="secondary small" disabled title="Número no válido o teléfono fijo: revisa el campo teléfono">Sin WhatsApp</button>`;
+ return nums.map(n=>`<button class="success small" onclick="openWhatsApp('${n}')" title="Abrir WhatsApp con ${n}">WhatsApp${nums.length>1?" ·"+n.slice(-4):""}</button>`).join("");
+}
+
 function val(id){return document.getElementById(id).value.trim()}
 function setVal(id,v){document.getElementById(id).value=v??""}
 function showError(msg){const e=document.getElementById("loginError");e.textContent=msg;e.style.display="block"}
@@ -298,6 +326,7 @@ function render(){
    <td>${esc(c.phone||"—")}</td>
    <td><div class="actions">
      <button class="secondary small" onclick="showDetail('${c.id}')">Mostrar datos</button>
+     ${waButtons(c.phone)}
      <button class="secondary small" onclick="editClient('${c.id}')">Editar</button>
      <button class="danger small" onclick="deleteClient('${c.id}')">Eliminar</button>
    </div></td>
