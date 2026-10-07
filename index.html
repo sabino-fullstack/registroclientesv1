@@ -45,8 +45,6 @@
   <div class="card">
     <div class="controls">
       <input id="search" class="search" placeholder="Buscar por N.º de recibo, nombre o teléfono..." oninput="render()">
-      <button class="secondary" onclick="selectAllVisible()">☑ Seleccionar visibles</button>
-      <button class="success" onclick="copySelected()">📋 Copiar números</button>
       <button class="primary" onclick="openModal()">+ Nuevo cliente</button>
     </div>
     <div class="footer-tools">
@@ -59,7 +57,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th></th><th>ID / N.º recibo</th><th>Nombre</th><th>Teléfono</th><th>Acciones</th></tr>
+          <tr><th>ID / N.º recibo</th><th>Nombre</th><th>Teléfono</th><th>Acciones</th></tr>
         </thead>
         <tbody id="list"></tbody>
       </table>
@@ -208,10 +206,8 @@ const CONFIGS={
   key:"sb_publishable_4ffHbg6EfCDDk_H_RgLVVg_M-Iz52w7"
  },
  test:{
-
-
-  url:"https://isvlipgfntxrojeymbyz.supabase.co",   // <-- pegar aquí la URL del proyecto Supabase de PRUEBAS
-  key:"sb_publishable_62G0UMLLc16ojFlSdgOj8w_u_kYzhkS"  
+url:"https://isvlipgfntxrojeymbyz.supabase.co",   // <-- pegar aquí la URL del proyecto Supabase de PRUEBAS
+key:"sb_publishable_62G0UMLLc16ojFlSdgOj8w_u_kYzhkS"  
  }
 };
 const CFG=IS_PROD?CONFIGS.prod:CONFIGS.test;
@@ -318,11 +314,10 @@ function render(){
  document.getElementById("status").textContent=`${clients.length} cliente(s) registrado(s)${q?" · "+filtered.length+" encontrados":""}`;
  const list=document.getElementById("list");
  if(!filtered.length){
-   list.innerHTML='<tr><td colspan="5" class="empty">No hay clientes para mostrar.</td></tr>';
+   list.innerHTML='<tr><td colspan="4" class="empty">No hay clientes para mostrar.</td></tr>';
    return;
  }
  list.innerHTML=filtered.map(c=>`<tr>
-   <td><input type="checkbox" class="pick" value="${c.id}"></td>
    <td class="id-cell">${esc(c.receipt_number||"—")}</td>
    <td>${esc(c.name||"—")}</td>
    <td>${esc(c.phone||"—")}</td>
@@ -434,23 +429,6 @@ async function deleteClient(id){
  const {error}=await supabaseClient.from("clientes").delete().eq("id",id);
  if(error){alert("No se pudo eliminar: "+error.message);return}
  await loadClients();
-}
-
-function selectAllVisible(){
- const boxes=[...document.querySelectorAll(".pick")];
- if(!boxes.length)return;
- const all=boxes.every(x=>x.checked);
- boxes.forEach(x=>x.checked=!all);
-}
-function selectedIds(){return [...document.querySelectorAll(".pick:checked")].map(x=>x.value)}
-
-async function copySelected(){
- let ids=selectedIds(),data=clients.filter(c=>ids.includes(c.id));
- if(!data.length){if(!confirm("No seleccionaste clientes. ¿Copiar todos los números?"))return;data=clients}
- if(!data.length){alert("No hay números registrados.");return}
- const text=data.map(c=>c.phone).filter(Boolean).join("\n");
- try{await navigator.clipboard.writeText(text);alert(`${data.length} número(s) copiado(s).`)}
- catch(e){prompt("Copia estos números:",text)}
 }
 
 function exportCSV(){
