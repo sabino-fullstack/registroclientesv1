@@ -284,10 +284,10 @@ input:focus{
     width:105px;
     color:var(--muted)
   }
-  td:nth-child(2):before{content:"ID / Recibo"}
-  td:nth-child(3):before{content:"Nombre"}
-  td:nth-child(4):before{content:"Teléfono"}
-  td:nth-child(5):before{content:"Acciones"}
+  td:nth-child(1):before{content:"ID / Recibo"}
+  td:nth-child(2):before{content:"Nombre"}
+  td:nth-child(3):before{content:"Teléfono"}
+  td:nth-child(4):before{content:"Acciones"}
   td:first-child{font-size:17px;font-weight:700}
   .actions{margin-left:105px}
   .prescription-labels,.prescription-grid,.rx-table{
