@@ -37,7 +37,7 @@
   <div class="header">
     <div>
       <h1>Clientes</h1>
-      <div class="muted">Registro sincronizado de Optica Perfect </div>
+      <div class="muted">Registro sincronizado de Óptica Perfect HD</div>
     </div>
     <button class="secondary" onclick="logout()">Cerrar sesión</button>
   </div>
@@ -45,9 +45,8 @@
   <div class="card">
     <div class="controls">
       <input id="search" class="search" placeholder="Buscar por N.º de recibo, nombre o teléfono..." oninput="render()">
-      <button class="secondary" onclick="selectAllVisible()">☑ Seleccionar visibles</button>
-      <button class="success" onclick="copySelected()">📋 Copiar números</button>
       <button class="primary" onclick="openModal()">+ Nuevo cliente</button>
+      <button class="secondary" onclick="openReminders()">🔔 Recordatorios <span id="remBadge" class="badge" style="display:none"></span></button>
     </div>
     <div class="footer-tools">
       <button class="secondary" onclick="exportCSV()">⬇ Exportar CSV</button>
@@ -59,7 +58,7 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th></th><th>ID / N.º recibo</th><th>Nombre</th><th>Teléfono</th><th>Acciones</th></tr>
+          <tr><th>ID / N.º recibo</th><th>Nombre</th><th>Teléfono</th><th>Acciones</th></tr>
         </thead>
         <tbody id="list"></tbody>
       </table>
@@ -79,8 +78,10 @@
     </div>
 
     <input id="editId" type="hidden">
+    <input id="personaId" type="hidden">
 
     <div class="section-title">Identificación</div>
+    <p class="muted">Nombre, teléfonos y fecha de nacimiento son de la persona: se actualizan en todos sus recibos.</p>
     <div class="form-grid two">
       <div>
         <label>Fecha de recepción</label>
@@ -105,6 +106,14 @@
       <div>
         <label>Teléfono</label>
         <input id="phone" type="tel" placeholder="Ej. 76543210">
+      </div>
+      <div>
+        <label>Teléfono 2 (opcional)</label>
+        <input id="phone2" type="tel" placeholder="Otro número de contacto">
+      </div>
+      <div>
+        <label>Fecha de nacimiento (opcional)</label>
+        <input id="birth_date" type="date" oninput="syncAge()">
       </div>
     </div>
 
@@ -171,7 +180,7 @@
 
     <div class="modal-actions">
       <button class="secondary" onclick="closeModal()">Cancelar</button>
-      <button class="primary" onclick="saveClient()">Guardar</button>
+      <button id="saveBtn" class="primary" onclick="saveClient()">Guardar</button>
     </div>
   </div>
 </div>
@@ -189,8 +198,48 @@
     <div id="detailContent" class="detail-content"></div>
     <div class="modal-actions">
       <button class="secondary" onclick="closeDetail()">Cerrar</button>
+      <button id="detailNewButton" class="success">+ Nueva medida</button>
       <button id="detailEditButton" class="primary">Editar</button>
     </div>
+  </div>
+</div>
+
+<!-- Comparar medidas -->
+<div id="compareModal" class="modal">
+  <div class="modal-box detail-box">
+    <div class="modal-head">
+      <div>
+        <h2>Comparar medidas</h2>
+        <p id="compareSubtitle" class="muted"></p>
+      </div>
+      <button class="icon-button" onclick="closeCompare()" aria-label="Cerrar">✕</button>
+    </div>
+    <div id="compareContent"></div>
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeCompare()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Recordatorios -->
+<div id="remModal" class="modal">
+  <div class="modal-box detail-box">
+    <div class="modal-head">
+      <div><h2>Recordatorios</h2><p id="remSubtitle" class="muted"></p></div>
+      <button class="icon-button" onclick="closeReminders()" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="tabs">
+      <button id="tabCumple" class="secondary" onclick="setRemTab('cumple')">🎂 Cumpleaños</button>
+      <button id="tabControl" class="secondary" onclick="setRemTab('control')">👓 Control anual</button>
+    </div>
+    <div class="controls rem-controls">
+      <select id="remRange" onchange="renderReminders()"></select>
+      <label class="chk"><input type="checkbox" id="remHide" checked onchange="renderReminders()"> Ocultar ya enviados</label>
+    </div>
+    <label>Mensaje (<code>{nombre}</code> se reemplaza por el primer nombre)</label>
+    <textarea id="remTpl" rows="4" oninput="setTpl(remTab,this.value)"></textarea>
+    <div id="remList" style="margin-top:14px"></div>
+    <div class="modal-actions"><button class="secondary" onclick="closeReminders()">Cerrar</button></div>
   </div>
 </div>
 
@@ -200,7 +249,7 @@
 // ===== Configuración por entorno =====
 // Solo la URL de producción usa la base REAL. Cualquier otra (previews de Vercel, localhost)
 // usa la base de PRUEBAS. Así las claves no se mezclan al hacer merge a main.
-const PROD_HOSTS=["registroclientesv1.vercel.app"];
+const PROD_HOSTS=["registroclientesv1.vercel.app","clientesnubev1.vercel.app"];
 const IS_PROD=PROD_HOSTS.includes(location.hostname);
 const CONFIGS={
  prod:{
@@ -227,6 +276,10 @@ if(!IS_PROD){
 const supabaseClient=supabase.createClient(CFG.url,CFG.key);
 
 let clients=[];
+let personas=[];
+let personaById=new Map();
+let recCount=new Map();
+let personasOk=true;   // false si todavía no existe la tabla personas (modo anterior, sin historial)
 
 const fields=[
  "startt_date","receipt_number","booklet_number","name","age","phone","delivery_date","delivery_time",
@@ -240,6 +293,62 @@ function today(){const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 function formatDate(d){if(!d)return "";const [y,m,day]=d.split("-");return `${day}/${m}/${y}`}
 function formatMoney(v){if(v===null||v===undefined||v==="")return "";return Number(v).toFixed(2)}
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+// ===== WhatsApp =====
+// Lee el campo teléfono (puede traer 2 números separados por guion, barra, coma, "y"...)
+// y devuelve solo los celulares bolivianos válidos (8 dígitos que empiezan con 6 o 7).
+function parsePhones(raw){
+ const s=String(raw||"").trim();
+ if(!s)return [];
+ let parts=s.split(/\s*[\/,;\n]\s*|\s+-\s+|\s+[yYoO]\s+/).filter(Boolean);
+ parts=parts.map(p=>{
+   let d=p.replace(/\D/g,"");
+   if(d.length===11&&d.startsWith("591"))d=d.slice(3);
+   return d;
+ });
+ // "73091680-67938365" (sin espacios): 16 dígitos seguidos = dos números
+ if(parts.length===1&&parts[0].length===16)parts=[parts[0].slice(0,8),parts[0].slice(8)];
+ const out=[];
+ parts.forEach(d=>{if(/^[67]\d{7}$/.test(d)&&!out.includes(d))out.push(d)});
+ return out;
+}
+function waLink(num,text){
+ return `https://wa.me/591${num}${text?`?text=${encodeURIComponent(text)}`:""}`;
+}
+function openWhatsApp(num){window.open(waLink(num),"_blank","noopener")}
+function waButtons(phone){
+ const nums=parsePhones(phone);
+ if(!nums.length)return `<button class="secondary small" disabled title="Número no válido o teléfono fijo: revisa el campo teléfono">Sin WhatsApp</button>`;
+ return nums.map(n=>`<button class="success small" onclick="openWhatsApp('${n}')" title="Abrir WhatsApp con ${n}">WhatsApp${nums.length>1?" ·"+n.slice(-4):""}</button>`).join("");
+}
+
+// ===== Personas e historial =====
+function normName(s){return String(s||"").replace(/\s+/g," ").trim().toLowerCase()}
+function digitsOf(s){return String(s||"").replace(/\D/g,"")}
+function personKey(name,phone){return normName(name)+"|"+digitsOf(phone)}
+function personOf(c){return c&&c.persona_id?personaById.get(c.persona_id)||null:null}
+function nameOf(c){return personOf(c)?.name||c.name||""}
+function phoneOf(c){return personOf(c)?.phone||c.phone||""}
+function phone2Of(c){return personOf(c)?.phone2||""}
+function recDate(c){return c.delivery_date||c.startt_date||c.date||""}
+// devuelve -1 si a es más reciente que b, 1 si es más antiguo
+function byRecent(a,b){
+ const da=recDate(a),db=recDate(b);
+ if(da!==db)return da<db?1:-1;
+ return String(b.created_at||"").localeCompare(String(a.created_at||""));
+}
+function recibosOf(c){
+ if(!c.persona_id)return [c];
+ return clients.filter(x=>x.persona_id===c.persona_id).sort(byRecent);
+}
+function calcAge(bd){
+ if(!bd)return "";
+ const [y,m,d]=bd.split("-").map(Number),t=new Date();
+ let a=t.getFullYear()-y;
+ if(t.getMonth()+1<m||(t.getMonth()+1===m&&t.getDate()<d))a--;
+ return a>=0&&a<=120?a:"";
+}
+function syncAge(){const a=calcAge(document.getElementById("birth_date").value);if(a!=="")setVal("age",a)}
+
 function val(id){return document.getElementById(id).value.trim()}
 function setVal(id,v){document.getElementById(id).value=v??""}
 function showError(msg){const e=document.getElementById("loginError");e.textContent=msg;e.style.display="block"}
@@ -266,38 +375,55 @@ supabaseClient.auth.onAuthStateChange((_event,session)=>{
  }
 });
 
-async function loadClients(){
- document.getElementById("status").textContent="Cargando...";
- // Supabase devuelve máximo 1000 filas por consulta: se pide por páginas
+// Supabase devuelve máximo 1000 filas por consulta: se pide por páginas
+async function fetchAll(table,orderCol="created_at"){
  const PAGE=1000;let all=[];
  for(let from=0;;from+=PAGE){
-   const {data,error}=await supabaseClient.from("clientes").select("*")
-     .order("created_at",{ascending:false}).order("id").range(from,from+PAGE-1);
-   if(error){document.getElementById("status").textContent="Error al cargar: "+error.message;return}
+   const {data,error}=await supabaseClient.from(table).select("*")
+     .order(orderCol,{ascending:false}).order("id").range(from,from+PAGE-1);
+   if(error)return {error};
    all=all.concat(data||[]);
    if(!data||data.length<PAGE)break;
  }
- clients=all;render();
+ return {data:all};
+}
+async function loadClients(){
+ document.getElementById("status").textContent="Cargando...";
+ const r=await fetchAll("clientes");
+ if(r.error){document.getElementById("status").textContent="Error al cargar: "+r.error.message;return}
+ const p=await fetchAll("personas");
+ if(p.error){
+   const missing=p.error.code==="42P01"||p.error.code==="PGRST205"||/does not exist|schema cache/i.test(p.error.message||"");
+   if(!missing){document.getElementById("status").textContent="Error al cargar: "+p.error.message;return}
+   personasOk=false;personas=[];
+ }else{personasOk=true;personas=p.data}
+ clients=r.data;
+ personaById=new Map(personas.map(x=>[x.id,x]));
+ recCount=new Map();
+ if(personasOk)clients.forEach(c=>{if(c.persona_id)recCount.set(c.persona_id,(recCount.get(c.persona_id)||0)+1)});
+ if(personasOk)await loadSent();else remSent=new Set();
+ render();
+ updateRemBadge();
 }
 
 function render(){
  const q=document.getElementById("search").value.toLowerCase().trim();
  const filtered=clients.filter(c=>
-   `${c.receipt_number||""} ${c.name||""} ${c.phone||""}`.toLowerCase().includes(q)
+   `${c.receipt_number||""} ${nameOf(c)} ${phoneOf(c)} ${phone2Of(c)}`.toLowerCase().includes(q)
  );
  document.getElementById("status").textContent=`${clients.length} cliente(s) registrado(s)${q?" · "+filtered.length+" encontrados":""}`;
  const list=document.getElementById("list");
  if(!filtered.length){
-   list.innerHTML='<tr><td colspan="5" class="empty">No hay clientes para mostrar.</td></tr>';
+   list.innerHTML='<tr><td colspan="4" class="empty">No hay clientes para mostrar.</td></tr>';
    return;
  }
  list.innerHTML=filtered.map(c=>`<tr>
-   <td><input type="checkbox" class="pick" value="${c.id}"></td>
    <td class="id-cell">${esc(c.receipt_number||"—")}</td>
-   <td>${esc(c.name||"—")}</td>
-   <td>${esc(c.phone||"—")}</td>
+   <td>${esc(nameOf(c)||"—")}${(recCount.get(c.persona_id)||1)>1?` <span class="badge" title="Esta persona tiene varios recibos">${recCount.get(c.persona_id)} recibos</span>`:""}</td>
+   <td>${esc(phoneOf(c)||"—")}${phone2Of(c)?` <span class="muted">· ${esc(phone2Of(c))}</span>`:""}</td>
    <td><div class="actions">
      <button class="secondary small" onclick="showDetail('${c.id}')">Mostrar datos</button>
+     ${waButtons([phoneOf(c),phone2Of(c)].filter(Boolean).join(" / "))}
      <button class="secondary small" onclick="editClient('${c.id}')">Editar</button>
      <button class="danger small" onclick="deleteClient('${c.id}')">Eliminar</button>
    </div></td>
@@ -307,27 +433,69 @@ function render(){
 function clearForm(){
  fields.forEach(id=>setVal(id,""));
  setVal("startt_date",today());   // fecha de recepción = hoy (editable)
+ setVal("phone2","");setVal("birth_date","");setVal("personaId","");
  setVal("account","0");
  setVal("balance","0");
  setVal("total","0");
 }
 
-function openModal(id=null){
+function openModal(id=null,opts={}){
  document.getElementById("modal").classList.add("show");
  document.getElementById("editId").value=id||"";
- document.getElementById("modalTitle").textContent=id?"Editar cliente":"Nuevo cliente";
+ const title=document.getElementById("modalTitle");
  if(id){
+   title.textContent="Editar cliente";
    const c=clients.find(x=>x.id===id);
    fields.forEach(f=>setVal(f,c?.[f]));
+   setVal("name",nameOf(c));setVal("phone",phoneOf(c));
+   setVal("phone2",phone2Of(c));setVal("birth_date",personOf(c)?.birth_date||"");
+   setVal("personaId",c?.persona_id||"");
  }else{
    clearForm();
+   const p=opts.personaId?personaById.get(opts.personaId):null;
+   if(p){
+     title.textContent="Nueva medida — "+p.name;
+     setVal("personaId",p.id);setVal("name",p.name);setVal("phone",p.phone);
+     setVal("phone2",p.phone2);setVal("birth_date",p.birth_date);
+     const age=calcAge(p.birth_date);if(age!=="")setVal("age",age);
+   }else title.textContent="Nuevo cliente";
  }
- setTimeout(()=>document.getElementById("receipt_number").focus(),50);
+ // enfocar el N.º de recibo, salvo que la persona ya haya empezado a escribir en otro campo
+ setTimeout(()=>{const m=document.getElementById("modal");if(!m.contains(document.activeElement))document.getElementById("receipt_number").focus()},50);
 }
 
 function closeModal(){document.getElementById("modal").classList.remove("show")}
 
-async function saveClient(){
+// Crea o actualiza la persona y devuelve su id. Si ya existe alguien con el mismo nombre
+// y teléfono, pregunta si es la misma persona para sumar el recibo a su historial.
+async function savePersona(personaId,pdata){
+ if(personaId){
+   const old=personaById.get(personaId);
+   const changed=!old||old.name!==pdata.name||old.phone!==pdata.phone;
+   const {error}=await supabaseClient.from("personas").update(pdata).eq("id",personaId);
+   if(error)throw error;
+   return {id:personaId,changed};
+ }
+ const same=personas.find(p=>personKey(p.name,p.phone)===personKey(pdata.name,pdata.phone));
+ if(same){
+   const n=recCount.get(same.id)||0;
+   if(confirm(`Ya existe "${same.name}" con ese teléfono (${n} recibo${n===1?"":"s"}).\n\nAceptar = es la misma persona: se agrega a su historial.\nCancelar = es otra persona: se crea una nueva.`)){
+     const fill={};
+     if(pdata.phone2&&!same.phone2)fill.phone2=pdata.phone2;
+     if(pdata.birth_date&&!same.birth_date)fill.birth_date=pdata.birth_date;
+     if(Object.keys(fill).length){
+       const {error}=await supabaseClient.from("personas").update(fill).eq("id",same.id);
+       if(error)throw error;
+     }
+     return {id:same.id,changed:false};
+   }
+ }
+ const {data,error}=await supabaseClient.from("personas").insert(pdata).select().single();
+ if(error)throw error;
+ return {id:data.id,changed:false,created:true};
+}
+
+async function saveClientInner(){
  const id=document.getElementById("editId").value;
  const data={};
  fields.forEach(f=>{
@@ -343,12 +511,66 @@ async function saveClient(){
    alert("Ingresa el N.º de recibo / ID, el nombre y el teléfono.");
    return;
  }
+ // evitar recibos duplicados
+ const dup=clients.find(x=>x.id!==id&&String(x.receipt_number||"").trim().toLowerCase()===String(data.receipt_number).toLowerCase());
+ if(dup&&!confirm(`El recibo ${data.receipt_number} ya existe (${nameOf(dup)}). ¿Guardar de todos modos?`))return;
+
+ let personaChanged=false,personaCreated=false;
+ if(personasOk){
+   try{
+     const r=await savePersona(val("personaId")||null,{
+       name:data.name,phone:data.phone,phone2:val("phone2")||null,birth_date:val("birth_date")||null
+     });
+     data.persona_id=r.id;personaChanged=r.changed;personaCreated=!!r.created;
+   }catch(e){alert("No se pudo guardar la persona: "+(e.message||e));return}
+ }
  let result;
  if(id) result=await supabaseClient.from("clientes").update(data).eq("id",id);
  else result=await supabaseClient.from("clientes").insert(data);
- if(result.error){alert("No se pudo guardar: "+result.error.message);return}
+ if(result.error){
+   // si la persona se creó recién para este recibo, no dejarla suelta
+   if(personaCreated)await supabaseClient.from("personas").delete().eq("id",data.persona_id);
+   alert("No se pudo guardar: "+result.error.message);return
+ }
+ if(personasOk&&data.persona_id&&personaChanged){
+   // mantener igual el nombre y teléfono en todos los recibos de la persona
+   const {error}=await supabaseClient.from("clientes").update({name:data.name,phone:data.phone}).eq("persona_id",data.persona_id);
+   if(error)alert("Se guardó, pero no se pudieron actualizar sus otros recibos: "+error.message);
+ }
  closeModal();
  await loadClients();
+}
+
+let saving=false;
+async function saveClient(){
+ if(saving)return;
+ saving=true;
+ const btn=document.getElementById("saveBtn");if(btn)btn.disabled=true;
+ try{await saveClientInner()}
+ finally{saving=false;if(btn)btn.disabled=false}
+}
+
+// Abre el formulario para un recibo nuevo de una persona que ya existe (nueva medida)
+async function newMeasure(id){
+ const c=clients.find(x=>x.id===id);
+ if(!c)return;
+ let pid=c.persona_id;
+ if(!pid&&personasOk){
+   try{
+     const same=personas.find(p=>personKey(p.name,p.phone)===personKey(c.name,c.phone));
+     if(same)pid=same.id;
+     else{
+       const {data,error}=await supabaseClient.from("personas").insert({name:c.name,phone:c.phone}).select().single();
+       if(error)throw error;
+       pid=data.id;
+     }
+     const {error:e2}=await supabaseClient.from("clientes").update({persona_id:pid}).eq("id",id);
+     if(e2)throw e2;
+     await loadClients();
+   }catch(e){alert("No se pudo preparar el historial: "+(e.message||e));return}
+ }
+ closeDetail();
+ openModal(null,{personaId:pid});
 }
 
 function editClient(id){openModal(id)}
@@ -356,10 +578,10 @@ function editClient(id){openModal(id)}
 function showDetail(id){
  const c=clients.find(x=>x.id===id);
  if(!c)return;
- document.getElementById("detailSubtitle").textContent=`ID ${c.receipt_number||"—"} · ${c.name||"Sin nombre"}`;
+ document.getElementById("detailSubtitle").textContent=`ID ${c.receipt_number||"—"} · ${nameOf(c)||"Sin nombre"}`;
  document.getElementById("detailContent").innerHTML=`
    ${detailSection("Identificación",[
-     ["N.º de recibo / ID",c.receipt_number],["N.º de talonario",c.booklet_number],["Fecha de recepción",formatDate(c.startt_date)],["Cliente",c.name],["Edad",c.age],["Teléfono",c.phone]
+     ["N.º de recibo / ID",c.receipt_number],["N.º de talonario",c.booklet_number],["Fecha de recepción",formatDate(c.startt_date)],["Cliente",nameOf(c)],["Edad",calcAge(personOf(c)?.birth_date)||c.age],["Teléfono",phoneOf(c)],["Teléfono 2",phone2Of(c)],["Fecha de nacimiento",formatDate(personOf(c)?.birth_date)]
    ])}
    ${detailSection("Entrega",[
      ["Día de entrega",formatDate(c.delivery_date||c.date)],["Hora de entrega",c.delivery_time?c.delivery_time.slice(0,5):""]
@@ -375,8 +597,12 @@ function showDetail(id){
      ["Adición",c.addition],["D.P.",c.dp]
    ])}
    ${prescriptionSection("Cerca",c,"near")}
+   ${historySection(c)}
  `;
  document.getElementById("detailEditButton").onclick=()=>{closeDetail();openModal(id)};
+ const nb=document.getElementById("detailNewButton");
+ nb.style.display=personasOk?"":"none";
+ nb.onclick=()=>newMeasure(id);
  document.getElementById("detailModal").classList.add("show");
 }
 
@@ -395,31 +621,209 @@ function prescriptionSection(title,c,prefix){
  </div></div>`;
 }
 
+function rxSummary(r){
+ const f=p=>[r[p+"_sph"],r[p+"_cyl"],r[p+"_axis"]].map(v=>v||"—").join(" / ");
+ return `Lejos  O.D. ${f("far_od")}  ·  O.I. ${f("far_oi")}`;
+}
+function historySection(c){
+ if(!personasOk)return "";
+ const list=recibosOf(c);
+ if(list.length<2)return `<div class="detail-section"><h3>Historial de medidas</h3><div class="muted">Solo tiene este recibo. Usa «Nueva medida» cuando vuelva a hacerse una.</div></div>`;
+ return `<div class="detail-section"><h3>Historial de medidas (${list.length})</h3>
+ ${list.map(r=>`<div class="hist-row${r.id===c.id?" current":""}">
+   <div><strong>Recibo ${esc(r.receipt_number||"—")}</strong><span class="muted"> · entrega ${esc(formatDate(recDate(r))||"—")}</span>
+     <div class="muted small-text">${esc(rxSummary(r))}</div></div>
+   <div class="actions">${r.id===c.id?'<span class="muted">(este)</span>':`<button class="secondary small" onclick="showDetail('${r.id}')">Ver</button><button class="secondary small" onclick="openCompare('${c.id}','${r.id}')">Comparar</button>`}</div>
+ </div>`).join("")}</div>`;
+}
+
+// ===== Comparar dos medidas =====
+function parseNum(s){const m=String(s??"").replace(",",".").match(/[+-]?\d+(\.\d+)?/);return m?parseFloat(m[0]):null}
+function fmtDelta(d){const r=Math.round(d*100)/100;return (r>0?"+":"")+r.toFixed(2)}
+function openCompare(idA,idB){
+ let a=clients.find(x=>x.id===idA),b=clients.find(x=>x.id===idB);
+ if(!a||!b)return;
+ if(byRecent(a,b)>0)[a,b]=[b,a];   // a = más reciente, b = más antigua
+ const rows=[];
+ [["Lejos","far"],["Cerca","near"]].forEach(([title,p])=>{
+   rows.push({head:title});
+   [["O.D.","od"],["O.I.","oi"]].forEach(([eye,e])=>{
+     rows.push({label:eye+" Esf.",a:a[`${p}_${e}_sph`],b:b[`${p}_${e}_sph`],kind:"delta"});
+     rows.push({label:eye+" Cil.",a:a[`${p}_${e}_cyl`],b:b[`${p}_${e}_cyl`],kind:"delta"});
+     rows.push({label:eye+" Eje",a:a[`${p}_${e}_axis`],b:b[`${p}_${e}_axis`],kind:"int"});
+   });
+ });
+ rows.push({head:"Otros"});
+ rows.push({label:"Adición",a:a.addition,b:b.addition,kind:"delta"});
+ rows.push({label:"D.P.",a:a.dp,b:b.dp,kind:"text"});
+ const show=v=>esc(v===null||v===undefined||v===""?"—":v);
+ const head=r=>`Recibo ${esc(r.receipt_number||"—")}<br><small>${esc(formatDate(recDate(r))||"—")}</small>`;
+ let changes=0;
+ const body=rows.map(r=>{
+   if(r.head)return `<div class="cmp-title">${r.head}</div>`;
+   const sa=String(r.a??"").trim(),sb=String(r.b??"").trim(),na=parseNum(sa),nb=parseNum(sb);
+   let diff,change="";
+   if(r.kind!=="text"&&na!==null&&nb!==null){
+     diff=na!==nb;
+     if(diff)change=r.kind==="delta"?fmtDelta(na-nb):"cambió";
+   }else{
+     diff=sa.toLowerCase()!==sb.toLowerCase();
+     if(diff)change="cambió";
+   }
+   if(diff)changes++;
+   return `<div class="cmp-grid${diff?" diff":""}"><span>${esc(r.label)}</span><span>${show(r.a)}</span><span>${show(r.b)}</span><span>${change||"—"}</span></div>`;
+ }).join("");
+ document.getElementById("compareSubtitle").textContent=`${nameOf(a)} · ${changes?changes+" valor(es) distinto(s)":"sin cambios en la receta"}`;
+ document.getElementById("compareContent").innerHTML=
+   `<div class="cmp-grid cmp-head"><span></span><strong>Más reciente<br>${head(a)}</strong><strong>Anterior<br>${head(b)}</strong><strong>Cambio</strong></div>`+body;
+ document.getElementById("compareModal").classList.add("show");
+}
+function closeCompare(){document.getElementById("compareModal").classList.remove("show")}
+
 function closeDetail(){document.getElementById("detailModal").classList.remove("show")}
 
 async function deleteClient(id){
  const c=clients.find(x=>x.id===id);
- if(!confirm(`¿Eliminar a ${c?.name||"este cliente"}?`))return;
+ if(!c)return;
+ if(!confirm(`¿Eliminar el recibo ${c.receipt_number||""} de ${nameOf(c)||"este cliente"}?`))return;
+ const pid=c.persona_id;
  const {error}=await supabaseClient.from("clientes").delete().eq("id",id);
  if(error){alert("No se pudo eliminar: "+error.message);return}
+ // si era el único recibo de la persona, se elimina también la persona
+ if(personasOk&&pid&&(recCount.get(pid)||0)<=1)await supabaseClient.from("personas").delete().eq("id",pid);
  await loadClients();
 }
 
-function selectAllVisible(){
- const boxes=[...document.querySelectorAll(".pick")];
- if(!boxes.length)return;
- const all=boxes.every(x=>x.checked);
- boxes.forEach(x=>x.checked=!all);
-}
-function selectedIds(){return [...document.querySelectorAll(".pick:checked")].map(x=>x.value)}
+// ===== Recordatorios =====
+const REM_DEFAULT={
+ cumple:"Hola {nombre} 🎉 En Óptica Perfect HD siempre pensamos en ti. ¡Feliz cumpleaños! Tenemos un regalo para ti en este día tan especial, puedes pasar por la tienda para reclamarlo.",
+ control:"Hola {nombre} 👓 Te saludamos de Óptica Perfect HD. Ya pasó un año desde tu última medida de vista, te invitamos a pasar por la sucursal para un nuevo control. ¡Te esperamos!"
+};
+let remSent=new Set(),remTracking=true,remTab="cumple";
 
-async function copySelected(){
- let ids=selectedIds(),data=clients.filter(c=>ids.includes(c.id));
- if(!data.length){if(!confirm("No seleccionaste clientes. ¿Copiar todos los números?"))return;data=clients}
- if(!data.length){alert("No hay números registrados.");return}
- const text=data.map(c=>c.phone).filter(Boolean).join("\n");
- try{await navigator.clipboard.writeText(text);alert(`${data.length} número(s) copiado(s).`)}
- catch(e){prompt("Copia estos números:",text)}
+function remKey(pid,tipo,per){return pid+"|"+tipo+"|"+per}
+function getTpl(t){try{return localStorage.getItem("rem_tpl_"+t)||REM_DEFAULT[t]}catch(e){return REM_DEFAULT[t]}}
+function setTpl(t,v){try{localStorage.setItem("rem_tpl_"+t,v)}catch(e){}}
+function firstName(n){const w=String(n||"").trim().split(/\s+/)[0]||"";return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()}
+function startOfToday(){const d=new Date();return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+function parseYMD(s){const [y,m,d]=String(s||"").split("-").map(Number);return {y,m,d}}
+// 29 de febrero en año no bisiesto se trata como 28 de febrero
+function mkDate(y,m,d){if(m===2&&d===29&&new Date(y,2,0).getDate()!==29)d=28;return new Date(y,m-1,d)}
+
+async function loadSent(){
+ const r=await fetchAll("recordatorios","sent_at");
+ if(r.error){remTracking=false;remSent=new Set();return}
+ remTracking=true;
+ remSent=new Set(r.data.map(x=>remKey(x.persona_id,x.tipo,x.periodo)));
+}
+
+// range = días hacia adelante (0 = solo hoy)
+function birthdayList(range){
+ const t=startOfToday(),out=[];
+ personas.forEach(p=>{
+   if(!p.birth_date||!recCount.get(p.id))return;   // ignora personas sin recibos
+   const {y,m,d}=parseYMD(p.birth_date);
+   if(!y||!m||!d)return;
+   let n=mkDate(t.getFullYear(),m,d);
+   if(n<t)n=mkDate(t.getFullYear()+1,m,d);
+   const days=Math.round((n-t)/86400000);
+   if(days<=range)out.push({persona:p,days,age:n.getFullYear()-y,periodo:String(n.getFullYear())});
+ });
+ return out.sort((a,b)=>a.days-b.days||String(a.persona.name).localeCompare(String(b.persona.name)));
+}
+
+// win = días transcurridos desde que se cumplió el año de la última medida
+function controlList(win){
+ const t=startOfToday(),last=new Map(),out=[];
+ clients.forEach(c=>{
+   if(!c.persona_id||!recDate(c))return;
+   const cur=last.get(c.persona_id);
+   if(!cur||byRecent(c,cur)<0)last.set(c.persona_id,c);
+ });
+ last.forEach((c,pid)=>{
+   const p=personaById.get(pid);if(!p)return;
+   const {y,m,d}=parseYMD(recDate(c));
+   const since=Math.round((t-mkDate(y+1,m,d))/86400000);
+   if(since>=0&&since<=win)out.push({persona:p,c,since,periodo:c.id});
+ });
+ return out.sort((a,b)=>a.since-b.since);
+}
+
+function updateRemBadge(){
+ const el=document.getElementById("remBadge");if(!el)return;
+ let n=0;
+ if(personasOk){
+   n+=birthdayList(0).filter(x=>!remSent.has(remKey(x.persona.id,"cumple",x.periodo))).length;
+   n+=controlList(30).filter(x=>!remSent.has(remKey(x.persona.id,"control",x.periodo))).length;
+ }
+ el.textContent=n;el.style.display=n?"inline-block":"none";
+}
+
+function openReminders(){
+ if(!personasOk){alert("Los recordatorios necesitan la tabla personas (ejecuta 001_personas.sql).");return}
+ document.getElementById("remModal").classList.add("show");
+ setRemTab(remTab);
+}
+function closeReminders(){document.getElementById("remModal").classList.remove("show");updateRemBadge()}
+
+function setRemTab(tab){
+ remTab=tab;
+ document.getElementById("tabCumple").classList.toggle("active",tab==="cumple");
+ document.getElementById("tabControl").classList.toggle("active",tab==="control");
+ const opts=tab==="cumple"
+  ?[["0","Hoy"],["7","Próximos 7 días"],["30","Próximos 30 días"]]
+  :[["7","Cumplieron 1 año: últimos 7 días"],["30","Cumplieron 1 año: últimos 30 días"],["90","Cumplieron 1 año: últimos 90 días"],["100000","Todos los vencidos"]];
+ const sel=document.getElementById("remRange");
+ sel.innerHTML=opts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+ sel.value=tab==="cumple"?"0":"30";
+ document.getElementById("remTpl").value=getTpl(tab);
+ renderReminders();
+}
+
+function renderReminders(){
+ const tipo=remTab,range=Number(document.getElementById("remRange").value);
+ const hide=document.getElementById("remHide").checked;
+ let items=tipo==="cumple"?birthdayList(range):controlList(range);
+ const isSent=x=>remSent.has(remKey(x.persona.id,tipo,x.periodo));
+ const total=items.length,pending=items.filter(x=>!isSent(x)).length;
+ if(hide)items=items.filter(x=>!isSent(x));
+ document.getElementById("remSubtitle").textContent=`${total} en la lista · ${pending} pendiente(s)`+(remTracking?"":" · sin registro de enviados (falta ejecutar 002_recordatorios.sql)");
+ const box=document.getElementById("remList");
+ if(!items.length){
+   box.innerHTML=`<div class="empty">${tipo==="cumple"?"No hay cumpleaños en este rango (solo aparecen personas con fecha de nacimiento registrada).":"No hay clientes pendientes en este rango."}</div>`;
+   return;
+ }
+ box.innerHTML=items.slice(0,200).map(x=>{
+   const p=x.persona;
+   const nums=parsePhones([p.phone,p.phone2].filter(Boolean).join(" / "));
+   let info;
+   if(tipo==="cumple"){
+     info=`${x.days===0?"Hoy":x.days===1?"Mañana":"En "+x.days+" días"} · cumple ${x.age} años · ${esc(formatDate(p.birth_date))}`;
+   }else{
+     info=`Última medida: ${esc(formatDate(recDate(x.c)))} · Recibo ${esc(x.c.receipt_number||"—")} · ${x.since===0?"cumple el año hoy":"venció hace "+x.since+" día(s)"}`;
+   }
+   const btns=nums.length
+     ?nums.map(n=>`<button class="success small" onclick="sendReminder('${p.id}','${tipo}','${x.periodo}','${n}')">WhatsApp${nums.length>1?" ·"+n.slice(-4):""}</button>`).join("")
+     :`<button class="secondary small" disabled title="Sin celular válido">Sin WhatsApp</button>`;
+   return `<div class="rem-row${isSent(x)?" sent":""}" id="rem-${p.id}">
+     <div><strong>${esc(p.name)}</strong>${isSent(x)?' <span class="muted">✓ enviado</span>':""}
+       <div class="muted small-text">${info}</div></div>
+     <div class="actions">${btns}</div></div>`;
+ }).join("")+(items.length>200?`<div class="muted" style="padding:10px">Mostrando 200 de ${items.length}. Reduce el rango para ver el resto.</div>`:"");
+}
+
+async function sendReminder(pid,tipo,periodo,num){
+ const p=personaById.get(pid);
+ const text=document.getElementById("remTpl").value.replace(/\{nombre\}/g,firstName(p?.name));
+ window.open(waLink(num,text),"_blank","noopener");   // antes de cualquier await, para que no lo bloquee el navegador
+ const k=remKey(pid,tipo,periodo);
+ if(!remTracking||remSent.has(k))return;
+ const {error}=await supabaseClient.from("recordatorios").insert({persona_id:pid,tipo,periodo});
+ if(error&&error.code!=="23505"){alert("No se pudo registrar el envío: "+error.message);return}
+ remSent.add(k);
+ const row=document.getElementById("rem-"+pid);
+ if(row)row.classList.add("sent");   // sigue visible por si hay que escribirle al segundo número
+ updateRemBadge();
 }
 
 function exportCSV(){
@@ -427,13 +831,15 @@ function exportCSV(){
   "ID/N.º recibo","N.º talonario","Fecha de recepción","Cliente","Edad","Teléfono","Día entrega","Hora entrega",
   "Armazón","Modelo","Marca","Cristales","Receta Dr.","Detalle","Entregado por",
   "A cuenta","Saldo","Total","Lejos OD Esf","Lejos OD Cil","Lejos OD Eje","Lejos OI Esf","Lejos OI Cil","Lejos OI Eje",
-  "Adición","D.P.","Cerca OD Esf","Cerca OD Cil","Cerca OD Eje","Cerca OI Esf","Cerca OI Cil","Cerca OI Eje"
+  "Adición","D.P.","Cerca OD Esf","Cerca OD Cil","Cerca OD Eje","Cerca OI Esf","Cerca OI Cil","Cerca OI Eje",
+  "Teléfono 2","Fecha de nacimiento"
  ];
  const rows=[headers,...clients.map(c=>[
-    c.receipt_number,c.booklet_number,c.startt_date,c.name,c.age,c.phone,c.delivery_date,c.delivery_time,
+    c.receipt_number,c.booklet_number,c.startt_date,nameOf(c),c.age,phoneOf(c),c.delivery_date,c.delivery_time,
     c.frame,c.model,c.brand,c.lenses,c.doctor_prescription,c.detail,c.delivered_by,
     c.account,c.balance,c.total,c.far_od_sph,c.far_od_cyl,c.far_od_axis,c.far_oi_sph,c.far_oi_cyl,c.far_oi_axis,
-    c.addition,c.dp,c.near_od_sph,c.near_od_cyl,c.near_od_axis,c.near_oi_sph,c.near_oi_cyl,c.near_oi_axis
+    c.addition,c.dp,c.near_od_sph,c.near_od_cyl,c.near_od_axis,c.near_oi_sph,c.near_oi_cyl,c.near_oi_axis,
+    phone2Of(c),personOf(c)?.birth_date
  ])];
 
 
@@ -452,8 +858,12 @@ function exportCSV(){
  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
-document.getElementById("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});
+// El formulario NO se cierra al tocar fuera (para no perder lo escrito); solo detalle, comparar y recordatorios
 document.getElementById("detailModal").addEventListener("click",e=>{if(e.target.id==="detailModal")closeDetail()});
+document.getElementById("compareModal").addEventListener("click",e=>{if(e.target.id==="compareModal")closeCompare()});
+document.getElementById("remModal").addEventListener("click",e=>{if(e.target.id==="remModal")closeReminders()});
+// Enter en la contraseña inicia sesión
+document.getElementById("password").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
 </script>
 <script>
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("service-worker.js"))}
