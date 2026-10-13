@@ -37,7 +37,7 @@
   <div class="header">
     <div>
       <h1>Clientes</h1>
-      <div class="muted">Registro sincronizado de Optica Perfect </div>
+      <div class="muted">Registro sincronizado de Óptica Perfect HD</div>
     </div>
     <button class="secondary" onclick="logout()">Cerrar sesión</button>
   </div>
@@ -46,6 +46,7 @@
     <div class="controls">
       <input id="search" class="search" placeholder="Buscar por N.º de recibo, nombre o teléfono..." oninput="render()">
       <button class="primary" onclick="openModal()">+ Nuevo cliente</button>
+      <button class="secondary" onclick="openReminders()">🔔 Recordatorios <span id="remBadge" class="badge" style="display:none"></span></button>
     </div>
     <div class="footer-tools">
       <button class="secondary" onclick="exportCSV()">⬇ Exportar CSV</button>
@@ -220,6 +221,28 @@
   </div>
 </div>
 
+<!-- Recordatorios -->
+<div id="remModal" class="modal">
+  <div class="modal-box detail-box">
+    <div class="modal-head">
+      <div><h2>Recordatorios</h2><p id="remSubtitle" class="muted"></p></div>
+      <button class="icon-button" onclick="closeReminders()" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="tabs">
+      <button id="tabCumple" class="secondary" onclick="setRemTab('cumple')">🎂 Cumpleaños</button>
+      <button id="tabControl" class="secondary" onclick="setRemTab('control')">👓 Control anual</button>
+    </div>
+    <div class="controls rem-controls">
+      <select id="remRange" onchange="renderReminders()"></select>
+      <label class="chk"><input type="checkbox" id="remHide" checked onchange="renderReminders()"> Ocultar ya enviados</label>
+    </div>
+    <label>Mensaje (<code>{nombre}</code> se reemplaza por el primer nombre)</label>
+    <textarea id="remTpl" rows="4" oninput="setTpl(remTab,this.value)"></textarea>
+    <div id="remList" style="margin-top:14px"></div>
+    <div class="modal-actions"><button class="secondary" onclick="closeReminders()">Cerrar</button></div>
+  </div>
+</div>
+
 <div class="design">design by brayan_sonco</div>
 
 <script>
@@ -353,11 +376,11 @@ supabaseClient.auth.onAuthStateChange((_event,session)=>{
 });
 
 // Supabase devuelve máximo 1000 filas por consulta: se pide por páginas
-async function fetchAll(table){
+async function fetchAll(table,orderCol="created_at"){
  const PAGE=1000;let all=[];
  for(let from=0;;from+=PAGE){
    const {data,error}=await supabaseClient.from(table).select("*")
-     .order("created_at",{ascending:false}).order("id").range(from,from+PAGE-1);
+     .order(orderCol,{ascending:false}).order("id").range(from,from+PAGE-1);
    if(error)return {error};
    all=all.concat(data||[]);
    if(!data||data.length<PAGE)break;
@@ -378,7 +401,9 @@ async function loadClients(){
  personaById=new Map(personas.map(x=>[x.id,x]));
  recCount=new Map();
  if(personasOk)clients.forEach(c=>{if(c.persona_id)recCount.set(c.persona_id,(recCount.get(c.persona_id)||0)+1)});
+ if(personasOk)await loadSent();else remSent=new Set();
  render();
+ updateRemBadge();
 }
 
 function render(){
@@ -486,6 +511,10 @@ async function saveClientInner(){
    alert("Ingresa el N.º de recibo / ID, el nombre y el teléfono.");
    return;
  }
+ // evitar recibos duplicados
+ const dup=clients.find(x=>x.id!==id&&String(x.receipt_number||"").trim().toLowerCase()===String(data.receipt_number).toLowerCase());
+ if(dup&&!confirm(`El recibo ${data.receipt_number} ya existe (${nameOf(dup)}). ¿Guardar de todos modos?`))return;
+
  let personaChanged=false,personaCreated=false;
  if(personasOk){
    try{
@@ -552,7 +581,7 @@ function showDetail(id){
  document.getElementById("detailSubtitle").textContent=`ID ${c.receipt_number||"—"} · ${nameOf(c)||"Sin nombre"}`;
  document.getElementById("detailContent").innerHTML=`
    ${detailSection("Identificación",[
-     ["N.º de recibo / ID",c.receipt_number],["N.º de talonario",c.booklet_number],["Fecha de recepción",formatDate(c.startt_date)],["Cliente",nameOf(c)],["Edad",c.age],["Teléfono",phoneOf(c)],["Teléfono 2",phone2Of(c)],["Fecha de nacimiento",formatDate(personOf(c)?.birth_date)]
+     ["N.º de recibo / ID",c.receipt_number],["N.º de talonario",c.booklet_number],["Fecha de recepción",formatDate(c.startt_date)],["Cliente",nameOf(c)],["Edad",calcAge(personOf(c)?.birth_date)||c.age],["Teléfono",phoneOf(c)],["Teléfono 2",phone2Of(c)],["Fecha de nacimiento",formatDate(personOf(c)?.birth_date)]
    ])}
    ${detailSection("Entrega",[
      ["Día de entrega",formatDate(c.delivery_date||c.date)],["Hora de entrega",c.delivery_time?c.delivery_time.slice(0,5):""]
@@ -665,6 +694,138 @@ async function deleteClient(id){
  await loadClients();
 }
 
+// ===== Recordatorios =====
+const REM_DEFAULT={
+ cumple:"Hola {nombre} 🎉 En Óptica Perfect HD siempre pensamos en ti. ¡Feliz cumpleaños! Tenemos un regalo para ti en este día tan especial, puedes pasar por la tienda para reclamarlo.",
+ control:"Hola {nombre} 👓 Te saludamos de Óptica Perfect HD. Ya pasó un año desde tu última medida de vista, te invitamos a pasar por la sucursal para un nuevo control. ¡Te esperamos!"
+};
+let remSent=new Set(),remTracking=true,remTab="cumple";
+
+function remKey(pid,tipo,per){return pid+"|"+tipo+"|"+per}
+function getTpl(t){try{return localStorage.getItem("rem_tpl_"+t)||REM_DEFAULT[t]}catch(e){return REM_DEFAULT[t]}}
+function setTpl(t,v){try{localStorage.setItem("rem_tpl_"+t,v)}catch(e){}}
+function firstName(n){const w=String(n||"").trim().split(/\s+/)[0]||"";return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()}
+function startOfToday(){const d=new Date();return new Date(d.getFullYear(),d.getMonth(),d.getDate())}
+function parseYMD(s){const [y,m,d]=String(s||"").split("-").map(Number);return {y,m,d}}
+// 29 de febrero en año no bisiesto se trata como 28 de febrero
+function mkDate(y,m,d){if(m===2&&d===29&&new Date(y,2,0).getDate()!==29)d=28;return new Date(y,m-1,d)}
+
+async function loadSent(){
+ const r=await fetchAll("recordatorios","sent_at");
+ if(r.error){remTracking=false;remSent=new Set();return}
+ remTracking=true;
+ remSent=new Set(r.data.map(x=>remKey(x.persona_id,x.tipo,x.periodo)));
+}
+
+// range = días hacia adelante (0 = solo hoy)
+function birthdayList(range){
+ const t=startOfToday(),out=[];
+ personas.forEach(p=>{
+   if(!p.birth_date||!recCount.get(p.id))return;   // ignora personas sin recibos
+   const {y,m,d}=parseYMD(p.birth_date);
+   if(!y||!m||!d)return;
+   let n=mkDate(t.getFullYear(),m,d);
+   if(n<t)n=mkDate(t.getFullYear()+1,m,d);
+   const days=Math.round((n-t)/86400000);
+   if(days<=range)out.push({persona:p,days,age:n.getFullYear()-y,periodo:String(n.getFullYear())});
+ });
+ return out.sort((a,b)=>a.days-b.days||String(a.persona.name).localeCompare(String(b.persona.name)));
+}
+
+// win = días transcurridos desde que se cumplió el año de la última medida
+function controlList(win){
+ const t=startOfToday(),last=new Map(),out=[];
+ clients.forEach(c=>{
+   if(!c.persona_id||!recDate(c))return;
+   const cur=last.get(c.persona_id);
+   if(!cur||byRecent(c,cur)<0)last.set(c.persona_id,c);
+ });
+ last.forEach((c,pid)=>{
+   const p=personaById.get(pid);if(!p)return;
+   const {y,m,d}=parseYMD(recDate(c));
+   const since=Math.round((t-mkDate(y+1,m,d))/86400000);
+   if(since>=0&&since<=win)out.push({persona:p,c,since,periodo:c.id});
+ });
+ return out.sort((a,b)=>a.since-b.since);
+}
+
+function updateRemBadge(){
+ const el=document.getElementById("remBadge");if(!el)return;
+ let n=0;
+ if(personasOk){
+   n+=birthdayList(0).filter(x=>!remSent.has(remKey(x.persona.id,"cumple",x.periodo))).length;
+   n+=controlList(30).filter(x=>!remSent.has(remKey(x.persona.id,"control",x.periodo))).length;
+ }
+ el.textContent=n;el.style.display=n?"inline-block":"none";
+}
+
+function openReminders(){
+ if(!personasOk){alert("Los recordatorios necesitan la tabla personas (ejecuta 001_personas.sql).");return}
+ document.getElementById("remModal").classList.add("show");
+ setRemTab(remTab);
+}
+function closeReminders(){document.getElementById("remModal").classList.remove("show");updateRemBadge()}
+
+function setRemTab(tab){
+ remTab=tab;
+ document.getElementById("tabCumple").classList.toggle("active",tab==="cumple");
+ document.getElementById("tabControl").classList.toggle("active",tab==="control");
+ const opts=tab==="cumple"
+  ?[["0","Hoy"],["7","Próximos 7 días"],["30","Próximos 30 días"]]
+  :[["7","Cumplieron 1 año: últimos 7 días"],["30","Cumplieron 1 año: últimos 30 días"],["90","Cumplieron 1 año: últimos 90 días"],["100000","Todos los vencidos"]];
+ const sel=document.getElementById("remRange");
+ sel.innerHTML=opts.map(([v,l])=>`<option value="${v}">${l}</option>`).join("");
+ sel.value=tab==="cumple"?"0":"30";
+ document.getElementById("remTpl").value=getTpl(tab);
+ renderReminders();
+}
+
+function renderReminders(){
+ const tipo=remTab,range=Number(document.getElementById("remRange").value);
+ const hide=document.getElementById("remHide").checked;
+ let items=tipo==="cumple"?birthdayList(range):controlList(range);
+ const isSent=x=>remSent.has(remKey(x.persona.id,tipo,x.periodo));
+ const total=items.length,pending=items.filter(x=>!isSent(x)).length;
+ if(hide)items=items.filter(x=>!isSent(x));
+ document.getElementById("remSubtitle").textContent=`${total} en la lista · ${pending} pendiente(s)`+(remTracking?"":" · sin registro de enviados (falta ejecutar 002_recordatorios.sql)");
+ const box=document.getElementById("remList");
+ if(!items.length){
+   box.innerHTML=`<div class="empty">${tipo==="cumple"?"No hay cumpleaños en este rango (solo aparecen personas con fecha de nacimiento registrada).":"No hay clientes pendientes en este rango."}</div>`;
+   return;
+ }
+ box.innerHTML=items.slice(0,200).map(x=>{
+   const p=x.persona;
+   const nums=parsePhones([p.phone,p.phone2].filter(Boolean).join(" / "));
+   let info;
+   if(tipo==="cumple"){
+     info=`${x.days===0?"Hoy":x.days===1?"Mañana":"En "+x.days+" días"} · cumple ${x.age} años · ${esc(formatDate(p.birth_date))}`;
+   }else{
+     info=`Última medida: ${esc(formatDate(recDate(x.c)))} · Recibo ${esc(x.c.receipt_number||"—")} · ${x.since===0?"cumple el año hoy":"venció hace "+x.since+" día(s)"}`;
+   }
+   const btns=nums.length
+     ?nums.map(n=>`<button class="success small" onclick="sendReminder('${p.id}','${tipo}','${x.periodo}','${n}')">WhatsApp${nums.length>1?" ·"+n.slice(-4):""}</button>`).join("")
+     :`<button class="secondary small" disabled title="Sin celular válido">Sin WhatsApp</button>`;
+   return `<div class="rem-row${isSent(x)?" sent":""}" id="rem-${p.id}">
+     <div><strong>${esc(p.name)}</strong>${isSent(x)?' <span class="muted">✓ enviado</span>':""}
+       <div class="muted small-text">${info}</div></div>
+     <div class="actions">${btns}</div></div>`;
+ }).join("")+(items.length>200?`<div class="muted" style="padding:10px">Mostrando 200 de ${items.length}. Reduce el rango para ver el resto.</div>`:"");
+}
+
+async function sendReminder(pid,tipo,periodo,num){
+ const p=personaById.get(pid);
+ const text=document.getElementById("remTpl").value.replace(/\{nombre\}/g,firstName(p?.name));
+ window.open(waLink(num,text),"_blank","noopener");   // antes de cualquier await, para que no lo bloquee el navegador
+ const k=remKey(pid,tipo,periodo);
+ if(!remTracking||remSent.has(k))return;
+ const {error}=await supabaseClient.from("recordatorios").insert({persona_id:pid,tipo,periodo});
+ if(error&&error.code!=="23505"){alert("No se pudo registrar el envío: "+error.message);return}
+ remSent.add(k);
+ const row=document.getElementById("rem-"+pid);
+ if(row)row.classList.add("sent");   // sigue visible por si hay que escribirle al segundo número
+ updateRemBadge();
+}
+
 function exportCSV(){
  const headers=[
   "ID/N.º recibo","N.º talonario","Fecha de recepción","Cliente","Edad","Teléfono","Día entrega","Hora entrega",
@@ -697,9 +858,12 @@ function exportCSV(){
  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
-document.getElementById("modal").addEventListener("click",e=>{if(e.target.id==="modal")closeModal()});
+// El formulario NO se cierra al tocar fuera (para no perder lo escrito); solo detalle, comparar y recordatorios
 document.getElementById("detailModal").addEventListener("click",e=>{if(e.target.id==="detailModal")closeDetail()});
 document.getElementById("compareModal").addEventListener("click",e=>{if(e.target.id==="compareModal")closeCompare()});
+document.getElementById("remModal").addEventListener("click",e=>{if(e.target.id==="remModal")closeReminders()});
+// Enter en la contraseña inicia sesión
+document.getElementById("password").addEventListener("keydown",e=>{if(e.key==="Enter")login()});
 </script>
 <script>
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("service-worker.js"))}

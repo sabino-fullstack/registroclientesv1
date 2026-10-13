@@ -28,7 +28,26 @@ alter table public.clientes
   add column if not exists persona_id uuid references public.personas(id) on delete set null;
 create index if not exists idx_clientes_persona_id on public.clientes (persona_id);
 
--- 3) Relleno de los recibos que ya existen:
+-- 3a) Recibos sin persona que coinciden con una persona que YA existe: se enlazan a ella
+--     (así este script se puede volver a ejecutar antes de publicar, para recoger recibos nuevos).
+update public.clientes c
+set persona_id = p.id
+from (
+  select distinct on (nkey, pkey) id, nkey, pkey
+  from (
+    select id, created_at,
+      lower(btrim(regexp_replace(coalesce(name,''), '\s+', ' ', 'g'))) as nkey,
+      regexp_replace(coalesce(phone,''), '\D', '', 'g')                 as pkey
+    from public.personas
+  ) x
+  order by nkey, pkey, created_at, id
+) p
+where c.persona_id is null
+  and coalesce(btrim(c.name),'') <> ''
+  and lower(btrim(regexp_replace(coalesce(c.name,''), '\s+', ' ', 'g'))) = p.nkey
+  and regexp_replace(coalesce(c.phone,''), '\D', '', 'g') = p.pkey;
+
+-- 3b) Relleno de los recibos que ya existen:
 --    misma persona = mismo nombre (sin importar mayúsculas/espacios) + mismo teléfono.
 --    Los datos de la persona salen de su recibo más reciente.
 with grupos as (
