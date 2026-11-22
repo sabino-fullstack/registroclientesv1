@@ -1,6 +1,6 @@
 {
-  "name": "Clientes",
-  "short_name": "Clientes",
+  "name": "Registro Clientes 'OPTICA' V1",
+  "short_name": "Registro Clientes V1",
   "description": "Registro sincronizado de clientes",
   "start_url": "./",
   "scope": "./",
